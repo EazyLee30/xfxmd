@@ -1,0 +1,16 @@
+services:
+  xfxmd:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      DATA_DIR: "/data"
+      MAX_WS_CONNECTIONS: "500"
+      MAX_PEERS_PER_ROOM: "120"
+    volumes:
+      - collab_data:/data
+    restart: unless-stopped
+
+volumes:
+  collab_data:

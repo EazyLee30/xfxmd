@@ -1,0 +1,251 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply m-0 antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(100, 116, 139, 0.3) transparent;
+  }
+}
+
+/* ── Editor ─────────────────────────────────────────── */
+.cm-editor {
+  height: 100%;
+}
+.cm-editor.cm-focused {
+  outline: none;
+}
+.cm-scroller {
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+.cm-gutters {
+  border-right: 1px solid var(--gutter-border, #e2e8f0) !important;
+}
+
+html.light {
+  --gutter-border: #e2e8f0;
+  .cm-gutters {
+    background: #f8fafc !important;
+    color: #94a3b8 !important;
+  }
+}
+html.dark {
+  --gutter-border: #1e293b;
+  .cm-gutters {
+    background: #0f172a !important;
+    color: #475569 !important;
+  }
+}
+
+/* ── Preview ────────────────────────────────────────── */
+.pre-md {
+  font-size: 14.5px;
+  line-height: 1.75;
+}
+.pre-md h1,
+.pre-md h2,
+.pre-md h3,
+.pre-md h4 {
+  @apply font-bold mt-6 mb-3;
+  letter-spacing: -0.02em;
+}
+.pre-md h1 {
+  @apply text-2xl;
+}
+.pre-md h2 {
+  @apply text-xl;
+}
+.pre-md h3 {
+  @apply text-lg;
+}
+.pre-md p {
+  @apply my-3;
+}
+.pre-md code {
+  @apply rounded px-1.5 py-0.5 text-[13px];
+}
+.pre-md pre {
+  @apply rounded-lg p-4 overflow-x-auto my-4;
+}
+.pre-md pre code {
+  @apply bg-transparent p-0 text-[13px];
+}
+.pre-md a {
+  @apply underline decoration-1 underline-offset-2;
+}
+.pre-md ul {
+  @apply list-disc pl-6 my-3 space-y-1;
+}
+.pre-md ol {
+  @apply list-decimal pl-6 my-3 space-y-1;
+}
+.pre-md blockquote {
+  @apply border-l-[3px] pl-4 my-4;
+}
+.pre-md table {
+  @apply w-full border-collapse my-4 text-sm;
+}
+.pre-md th,
+.pre-md td {
+  @apply border px-3 py-2 text-left;
+}
+.pre-md img {
+  @apply max-w-full h-auto my-4 rounded-lg;
+}
+.pre-md input[type="checkbox"] {
+  @apply mr-2 accent-teal-600;
+}
+.pre-md hr {
+  @apply my-8 border-0 h-px;
+}
+
+/* ── Light theme preview ────────────────────────────── */
+html.light .pre-md {
+  @apply text-slate-800;
+}
+html.light .pre-md code {
+  @apply bg-slate-100/80 text-rose-700;
+}
+html.light .pre-md pre {
+  @apply bg-[#1e293b] text-slate-200;
+}
+html.light .pre-md pre code {
+  @apply text-inherit;
+}
+html.light .pre-md a {
+  @apply text-teal-700;
+}
+html.light .pre-md blockquote {
+  @apply border-slate-300 text-slate-600;
+}
+html.light .pre-md th {
+  @apply bg-slate-50 font-semibold;
+}
+html.light .pre-md hr {
+  @apply bg-slate-200;
+}
+
+/* ── Dark theme preview ─────────────────────────────── */
+html.dark .pre-md {
+  @apply text-slate-200;
+}
+html.dark .pre-md code {
+  @apply bg-slate-800/80 text-rose-300;
+}
+html.dark .pre-md pre {
+  @apply bg-slate-950 text-slate-300;
+}
+html.dark .pre-md pre code {
+  @apply text-inherit;
+}
+html.dark .pre-md a {
+  @apply text-teal-400;
+}
+html.dark .pre-md blockquote {
+  @apply border-slate-600 text-slate-400;
+}
+html.dark .pre-md th {
+  @apply bg-slate-800 font-semibold;
+}
+html.dark .pre-md hr {
+  @apply bg-slate-700;
+}
+
+/* ── highlight.js ───────────────────────────────────── */
+.pre-md .hljs-keyword {
+  @apply text-violet-400;
+}
+.pre-md .hljs-string {
+  @apply text-emerald-400;
+}
+.pre-md .hljs-number,
+.pre-md .hljs-literal {
+  @apply text-amber-400;
+}
+.pre-md .hljs-comment {
+  @apply text-slate-500 italic;
+}
+.pre-md .hljs-function {
+  @apply text-sky-400;
+}
+.pre-md .hljs-title {
+  @apply text-sky-400;
+}
+
+/* ── Tooltip (for toolbar) ──────────────────────────── */
+[data-tooltip] {
+  position: relative;
+}
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) scale(0.95);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s, transform 0.15s;
+  z-index: 50;
+}
+[data-tooltip]:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}
+html.light [data-tooltip]::after {
+  @apply bg-slate-900 text-white;
+}
+html.dark [data-tooltip]::after {
+  @apply bg-slate-100 text-slate-900;
+}
+
+/* ── Slide-in animation ─────────────────────────────── */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.animate-slide-in {
+  animation: slideIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* ── Entry page atmosphere ──────────────────────────── */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+.animate-float {
+  animation: float 4s ease-in-out infinite;
+}
