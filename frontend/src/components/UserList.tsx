@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { WebsocketProvider } from 'y-websocket'
+import { buildDiceBearAvatarUrl, safeDiceBearAvatarUrl } from '../utils/avatars'
 
-type UserEntry = { clientId: number; name: string; color: string }
+type UserEntry = { clientId: number; name: string; color: string; avatarUrl?: string }
 
 export type UserListProps = {
   provider: WebsocketProvider
@@ -17,13 +18,14 @@ export function UserList({ provider, localClientId }: UserListProps) {
 
     const refresh = () => {
       const next: UserEntry[] = []
-      aw.getStates().forEach((state: { user?: { name?: string; color?: string } }, clientId: number) => {
+      aw.getStates().forEach((state: { user?: { name?: string; color?: string; avatarUrl?: string } }, clientId: number) => {
         const u = state.user
         if (!u?.name) return
         next.push({
           clientId,
           name: u.name,
           color: u.color ?? '#64748b',
+          avatarUrl: safeDiceBearAvatarUrl(u.avatarUrl) ?? buildDiceBearAvatarUrl('adventurer', u.name),
         })
       })
       next.sort((a, b) => a.name.localeCompare(b.name))
@@ -56,7 +58,16 @@ export function UserList({ provider, localClientId }: UserListProps) {
           className="inline-flex items-center gap-1 rounded-full border border-slate-200/80 bg-white/80 px-1.5 py-0.5 text-slate-600 dark:border-slate-700/60 dark:bg-slate-800/60 dark:text-slate-300"
           title={u.clientId === localClientId ? '你' : ''}
         >
-          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: u.color }} />
+          <span
+            className="h-5 w-5 shrink-0 overflow-hidden rounded-full bg-slate-100 ring-1 ring-white dark:bg-slate-700 dark:ring-slate-900"
+            style={{ boxShadow: `0 0 0 1px ${u.color}` }}
+          >
+            <img
+              src={u.avatarUrl}
+              alt=""
+              className="h-full w-full rounded-full object-cover"
+            />
+          </span>
           <span className="max-w-[60px] truncate">{u.name}{u.clientId === localClientId ? '(我)' : ''}</span>
         </span>
       ))}

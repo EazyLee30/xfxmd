@@ -130,6 +130,79 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"items": timelineStore.List(id, limit)})
 	})
 
+	// Admin routes - protected by password
+	adminPassword := os.Getenv("ADMIN_PASSWORD")
+	if adminPassword == "" {
+		adminPassword = "admin123"
+	}
+
+	adminAuth := func(c *gin.Context) {
+		token := c.GetHeader("X-Admin-Token")
+		if token == "" {
+			token = c.Query("token")
+		}
+		if token != adminPassword {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+
+	admin := r.Group("/api/admin", adminAuth)
+	{
+		admin.GET("/rooms", func(c *gin.Context) {
+			entries, err := os.ReadDir(store.Dir)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			var rooms []gin.H
+			for _, e := range entries {
+				if e.IsDir() || !strings.HasSuffix(e.Name(), ".yjs") {
+					continue
+				}
+				name := strings.TrimSuffix(e.Name(), ".yjs")
+				info, _ := e.Info()
+				size := int64(0)
+				if info != nil {
+					size = info.Size()
+				}
+				rooms = append(rooms, gin.H{"name": name, "size": size})
+			}
+			c.JSON(http.StatusOK, gin.H{"rooms": rooms})
+		})
+
+		admin.GET("/rooms/:id", func(c *gin.Context) {
+			id := c.Param("id")
+			data, err := store.LoadDoc(id)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			if data == nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "room not found"})
+				return
+			}
+			c.Data(http.StatusOK, "application/octet-stream", data)
+		})
+
+		admin.DELETE("/rooms/:id", func(c *gin.Context) {
+			id := c.Param("id")
+			key := room.Normalize(id)
+			path := store.Dir + "/" + key + ".yjs"
+			if err := os.Remove(path); err != nil {
+				if os.IsNotExist(err) {
+					c.JSON(http.StatusNotFound, gin.H{"error": "room not found"})
+					return
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"ok": true, "deleted": key})
+		})
+	}
+
 	r.GET("/yjs/:room", func(c *gin.Context) {
 		rm := c.Param("room")
 		if rm == "" {

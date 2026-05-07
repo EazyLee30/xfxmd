@@ -78,12 +78,21 @@ html.dark {
 }
 .pre-md code {
   @apply rounded px-1.5 py-0.5 text-[13px];
+  font-family: var(--font-mono);
+}
+.pre-md .md-color,
+.pre-md .md-mark {
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.pre-md .md-mark {
+  @apply rounded px-1 py-0.5;
 }
 .pre-md pre {
-  @apply rounded-lg p-4 overflow-x-auto my-4;
+  @apply rounded-lg border p-4 overflow-x-auto my-4;
 }
 .pre-md pre code {
-  @apply bg-transparent p-0 text-[13px];
+  @apply block bg-transparent p-0 text-[13.5px] leading-6;
 }
 .pre-md a {
   @apply underline decoration-1 underline-offset-2;
@@ -116,16 +125,16 @@ html.dark {
 
 /* ── Light theme preview ────────────────────────────── */
 html.light .pre-md {
-  @apply text-slate-800;
+  @apply bg-white text-slate-800;
 }
 html.light .pre-md code {
   @apply bg-slate-100/80 text-rose-700;
 }
 html.light .pre-md pre {
-  @apply bg-[#1e293b] text-slate-200;
+  @apply border-slate-700/70 bg-slate-950 text-slate-50;
 }
 html.light .pre-md pre code {
-  @apply text-inherit;
+  @apply bg-transparent p-0 text-inherit;
 }
 html.light .pre-md a {
   @apply text-teal-700;
@@ -142,16 +151,16 @@ html.light .pre-md hr {
 
 /* ── Dark theme preview ─────────────────────────────── */
 html.dark .pre-md {
-  @apply text-slate-200;
+  @apply bg-slate-950 text-slate-200;
 }
 html.dark .pre-md code {
   @apply bg-slate-800/80 text-rose-300;
 }
 html.dark .pre-md pre {
-  @apply bg-slate-950 text-slate-300;
+  @apply border-slate-700/80 bg-slate-900 text-slate-100;
 }
 html.dark .pre-md pre code {
-  @apply text-inherit;
+  @apply bg-transparent p-0 text-inherit;
 }
 html.dark .pre-md a {
   @apply text-teal-400;

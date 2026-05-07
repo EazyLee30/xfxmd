@@ -8,7 +8,7 @@ export type PreviewProps = {
 
 export function Preview({ markdown, scrollRef }: PreviewProps) {
   const html = DOMPurify.sanitize(renderMarkdown(markdown), {
-    ADD_ATTR: ['target'],
+    ADD_ATTR: ['target', 'style'],
     ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
   })
 

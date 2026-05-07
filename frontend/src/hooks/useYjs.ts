@@ -24,6 +24,7 @@ export function useYjs(
   room: string,
   displayName: string,
   color: string,
+  avatarUrl: string,
 ): {
   collab: CollabBundle | null
   synced: boolean
@@ -68,9 +69,10 @@ export function useYjs(
         name: displayName || '访客',
         color,
         colorLight: withAlpha(color),
+        avatarUrl,
       },
     })
-  }, [enabled, collab, displayName, color])
+  }, [enabled, collab, displayName, color, avatarUrl])
 
   return { collab, synced }
 }

@@ -5,11 +5,13 @@ import {
   UserCircle,
   Sparkles,
 } from 'lucide-react'
+import { buildDiceBearAvatarUrl, safeDiceBearAvatarUrl } from '../utils/avatars'
 
 export type OnlineUser = {
   clientId: number
   name: string
   color: string
+  avatarUrl?: string
 }
 
 export type TimelineItem = {
@@ -84,9 +86,15 @@ export function CollabPanel({ open, users, timeline, onClose }: CollabPanelProps
                 className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
               >
                 <span
-                  className="h-2.5 w-2.5 rounded-full ring-2 ring-white dark:ring-slate-900"
-                  style={{ backgroundColor: u.color }}
-                />
+                  className="h-6 w-6 shrink-0 overflow-hidden rounded-full bg-slate-100 ring-2 ring-white dark:bg-slate-800 dark:ring-slate-900"
+                  style={{ boxShadow: `0 0 0 1px ${u.color}` }}
+                >
+                  <img
+                    src={safeDiceBearAvatarUrl(u.avatarUrl) ?? buildDiceBearAvatarUrl('adventurer', u.name)}
+                    alt=""
+                    className="h-full w-full rounded-full object-cover"
+                  />
+                </span>
                 <span className="text-slate-700 dark:text-slate-200">{u.name}</span>
               </div>
             ))}

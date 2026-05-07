@@ -1,8 +1,10 @@
+import type { ReactNode } from 'react'
 import type { EditorView } from '@codemirror/view'
 import {
   Bold,
   Italic,
   Code,
+  ChevronDown,
   Heading1,
   Heading2,
   Heading3,
@@ -12,8 +14,11 @@ import {
   Link,
   ImageIcon,
   CodeSquare,
+  Highlighter,
   Minus,
+  Type,
 } from 'lucide-react'
+import { HIGHLIGHT_COLOR_OPTIONS, TEXT_COLOR_OPTIONS, type RichStyleKind, type RichStyleOption } from '../utils/richText'
 
 function wrap(view: EditorView, open: string, close: string = open) {
   const { from, to } = view.state.selection.main
@@ -44,6 +49,10 @@ function insertBlock(view: EditorView, text: string) {
   view.focus()
 }
 
+function wrapRichStyle(view: EditorView, kind: RichStyleKind, colorKey: string) {
+  wrap(view, `{${kind}:${colorKey}|`, '}')
+}
+
 export type ToolbarProps = {
   view: EditorView | null
   onAction?: (text: string) => void
@@ -52,7 +61,43 @@ export type ToolbarProps = {
 const btn =
   'group/btn relative flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-all hover:bg-slate-100 hover:text-slate-800 disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200'
 
+const menuBtn =
+  'group/btn relative flex h-7 w-8 items-center justify-center gap-0.5 rounded-md text-slate-500 transition-all hover:bg-slate-100 hover:text-slate-800 disabled:opacity-30 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200'
+
 const divider = 'mx-0.5 h-4 w-px bg-slate-200 dark:bg-slate-700'
+
+type ColorMenuProps = {
+  disabled: boolean
+  icon: ReactNode
+  options: RichStyleOption[]
+  tooltip: string
+  onPick: (key: string) => void
+}
+
+function ColorMenu({ disabled, icon, options, tooltip, onPick }: ColorMenuProps) {
+  return (
+    <div className="group/menu relative flex">
+      <button type="button" disabled={disabled} data-tooltip={tooltip} className={menuBtn}>
+        {icon}
+        <ChevronDown size={10} strokeWidth={2.2} />
+      </button>
+      <div className="absolute left-0 top-full z-40 mt-1 hidden w-[116px] grid-cols-4 gap-1 rounded-lg border border-slate-200 bg-white p-2 shadow-xl group-focus-within/menu:grid group-hover/menu:grid dark:border-slate-700 dark:bg-slate-900">
+        {options.map((option) => (
+          <button
+            key={option.key}
+            type="button"
+            disabled={disabled}
+            title={option.label}
+            aria-label={`${tooltip}：${option.label}`}
+            className="h-5 w-5 rounded border border-slate-200 shadow-sm transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-teal-400/40 disabled:opacity-40 dark:border-slate-700"
+            style={{ backgroundColor: option.value }}
+            onClick={() => onPick(option.key)}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
 
 export function Toolbar({ view, onAction }: ToolbarProps) {
   const disabled = !view
@@ -72,6 +117,20 @@ export function Toolbar({ view, onAction }: ToolbarProps) {
       <button type="button" disabled={disabled} data-tooltip="行内代码" className={btn} onClick={() => view && (wrap(view, '`'), done())}>
         <Code size={15} strokeWidth={2.2} />
       </button>
+      <ColorMenu
+        disabled={disabled}
+        tooltip="字体颜色"
+        icon={<Type size={15} strokeWidth={2.2} />}
+        options={TEXT_COLOR_OPTIONS}
+        onPick={(key) => view && (wrapRichStyle(view, 'color', key), done())}
+      />
+      <ColorMenu
+        disabled={disabled}
+        tooltip="高光"
+        icon={<Highlighter size={15} strokeWidth={2.2} />}
+        options={HIGHLIGHT_COLOR_OPTIONS}
+        onPick={(key) => view && (wrapRichStyle(view, 'mark', key), done())}
+      />
 
       <div className={divider} />
 

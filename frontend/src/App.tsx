@@ -12,6 +12,7 @@ import {
   ChevronDown,
   Pencil,
 } from 'lucide-react'
+import { AdminPage } from './components/AdminPage'
 import { CollabPanel, type OnlineUser, type TimelineItem } from './components/CollabPanel'
 import { Editor } from './components/Editor'
 import { Preview } from './components/Preview'
@@ -22,6 +23,7 @@ import { UserPanel } from './components/UserPanel'
 import { useScrollSync } from './hooks/useScrollSync'
 import { useYjs } from './hooks/useYjs'
 import { renderMarkdown } from './utils/markdown'
+import { buildDiceBearAvatarUrl } from './utils/avatars'
 
 function readDefaultRoom(): string {
   const q = new URLSearchParams(location.search).get('room')
@@ -32,10 +34,16 @@ function readDefaultRoom(): string {
 }
 
 export default function App() {
+  // Admin route
+  if (location.pathname === '/admin') {
+    return <AdminPage />
+  }
+
   const [joined, setJoined] = useState(false)
   const [displayName, setDisplayName] = useState('')
   const [room, setRoom] = useState(readDefaultRoom)
   const [color, setColor] = useState('#4363d8')
+  const [avatarUrl, setAvatarUrl] = useState(() => buildDiceBearAvatarUrl('adventurer', 'visitor'))
   const [dark, setDark] = useState(() =>
     typeof matchMedia !== 'undefined' ? matchMedia('(prefers-color-scheme: dark)').matches : false,
   )
@@ -54,7 +62,7 @@ export default function App() {
   const [splitPct, setSplitPct] = useState(52)
   const dragRef = useRef<{ startX: number; startPct: number; width: number } | null>(null)
 
-  const { collab, synced } = useYjs(joined, room, displayName, color)
+  const { collab, synced } = useYjs(joined, room, displayName, color, avatarUrl)
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -97,12 +105,13 @@ export default function App() {
     const aw = collab.provider.awareness
     const refresh = () => {
       const users: OnlineUser[] = []
-      aw.getStates().forEach((state: { user?: { name?: string; color?: string } }, clientId: number) => {
+      aw.getStates().forEach((state: { user?: { name?: string; color?: string; avatarUrl?: string } }, clientId: number) => {
         if (!state.user?.name) return
         users.push({
           clientId,
           name: state.user.name,
           color: state.user.color ?? '#64748b',
+          avatarUrl: state.user.avatarUrl,
         })
       })
       users.sort((a, b) => a.name.localeCompare(b.name))
@@ -148,10 +157,11 @@ export default function App() {
     setEditorView(v)
   }, [])
 
-  const onJoin = (name: string, r: string, c: string) => {
+  const onJoin = (name: string, r: string, c: string, avatar: string) => {
     setDisplayName(name)
     setRoom(r)
     setColor(c)
+    setAvatarUrl(avatar)
     setJoined(true)
     const url = new URL(location.href)
     url.searchParams.set('room', r)
@@ -241,6 +251,8 @@ export default function App() {
       pre { background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: 12px; overflow-x: auto; }
       code { background: #f1f5f9; padding: 2px 6px; border-radius: 6px; color: #e11d48; font-size: 0.9em; }
       pre code { background: transparent; padding: 0; color: inherit; }
+      .md-color, .md-mark { -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+      .md-mark { border-radius: 4px; padding: 1px 4px; }
       blockquote { border-left: 3px solid #cbd5e1; padding-left: 16px; color: #64748b; margin: 1.5em 0; }
       table { border-collapse: collapse; width: 100%; }
       th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
