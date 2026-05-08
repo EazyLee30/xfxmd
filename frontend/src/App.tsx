@@ -253,9 +253,17 @@ export default function App() {
       pre code { background: transparent; padding: 0; color: inherit; }
       .md-color, .md-mark { -webkit-box-decoration-break: clone; box-decoration-break: clone; }
       .md-mark { border-radius: 4px; padding: 1px 4px; }
+      .md-align { margin: 1em 0; }
+      .md-align > :first-child { margin-top: 0; }
+      .md-align > :last-child { margin-bottom: 0; }
+      .md-align-left { text-align: left; }
+      .md-align-center { text-align: center; }
+      .md-align-right { text-align: right; }
       blockquote { border-left: 3px solid #cbd5e1; padding-left: 16px; color: #64748b; margin: 1.5em 0; }
       table { border-collapse: collapse; width: 100%; }
       th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+      .md-align-center th, .md-align-center td { text-align: center; }
+      .md-align-right th, .md-align-right td { text-align: right; }
       th { background: #f8fafc; font-weight: 600; }
       img { max-width: 100%; height: auto; border-radius: 12px; }
       a { color: #0d9488; }

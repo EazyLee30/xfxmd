@@ -6,6 +6,7 @@ import json from 'highlight.js/lib/languages/json'
 import bash from 'highlight.js/lib/languages/bash'
 import go from 'highlight.js/lib/languages/go'
 import python from 'highlight.js/lib/languages/python'
+import type StateBlock from 'markdown-it/lib/rules_block/state_block.mjs'
 import type StateInline from 'markdown-it/lib/rules_inline/state_inline.mjs'
 import { getRichStyleCss, type RichStyleKind } from './richText'
 hljs.registerLanguage('javascript', javascript)
@@ -88,12 +89,46 @@ function richStyleRule(state: StateInline, silent: boolean): boolean {
   return true
 }
 
+const alignOpenRe = /^:::\s*align-(left|center|right)\s*$/
+const alignCloseRe = /^:::\s*$/
+
+function getBlockLine(state: StateBlock, line: number): string {
+  const start = state.bMarks[line] + state.tShift[line]
+  return state.src.slice(start, state.eMarks[line])
+}
+
+function alignBlockRule(state: StateBlock, startLine: number, endLine: number, silent: boolean): boolean {
+  const match = alignOpenRe.exec(getBlockLine(state, startLine))
+  if (!match) return false
+
+  let closeLine = startLine + 1
+  while (closeLine < endLine && !alignCloseRe.test(getBlockLine(state, closeLine))) {
+    closeLine += 1
+  }
+  if (closeLine >= endLine) return false
+  if (silent) return true
+
+  const openToken = state.push('align_open', 'div', 1)
+  openToken.block = true
+  openToken.attrJoin('class', `md-align md-align-${match[1]}`)
+
+  state.md.block.tokenize(state, startLine + 1, closeLine)
+
+  const closeToken = state.push('align_close', 'div', -1)
+  closeToken.block = true
+  state.line = closeLine + 1
+  return true
+}
+
 const md = new MarkdownIt({
   html: false,
   linkify: true,
   typographer: true,
   breaks: true,
   highlight: highlightFn,
+})
+md.block.ruler.before('paragraph', 'align_block', alignBlockRule, {
+  alt: ['paragraph', 'reference', 'blockquote', 'list'],
 })
 md.inline.ruler.before('emphasis', 'rich_style', richStyleRule)
 

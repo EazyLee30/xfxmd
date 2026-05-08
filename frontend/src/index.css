@@ -88,6 +88,24 @@ html.dark {
 .pre-md .md-mark {
   @apply rounded px-1 py-0.5;
 }
+.pre-md .md-align {
+  @apply my-3;
+}
+.pre-md .md-align > :first-child {
+  margin-top: 0;
+}
+.pre-md .md-align > :last-child {
+  margin-bottom: 0;
+}
+.md-align-left {
+  text-align: left;
+}
+.md-align-center {
+  text-align: center;
+}
+.md-align-right {
+  text-align: right;
+}
 .pre-md pre {
   @apply rounded-lg border p-4 overflow-x-auto my-4;
 }
@@ -112,6 +130,14 @@ html.dark {
 .pre-md th,
 .pre-md td {
   @apply border px-3 py-2 text-left;
+}
+.pre-md .md-align-center th,
+.pre-md .md-align-center td {
+  text-align: center;
+}
+.pre-md .md-align-right th,
+.pre-md .md-align-right td {
+  text-align: right;
 }
 .pre-md img {
   @apply max-w-full h-auto my-4 rounded-lg;
