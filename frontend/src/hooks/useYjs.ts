@@ -16,6 +16,8 @@ export type CollabBundle = {
   provider: WebsocketProvider
 }
 
+export type CollabStatus = 'idle' | 'connecting' | 'connected' | 'disconnected'
+
 /**
  * @param enabled when false, no WebSocket / Y.Doc is created.
  */
@@ -28,14 +30,14 @@ export function useYjs(
 ): {
   collab: CollabBundle | null
   synced: boolean
+  status: CollabStatus
 } {
   const [collab, setCollab] = useState<CollabBundle | null>(null)
   const [synced, setSynced] = useState(false)
+  const [status, setStatus] = useState<CollabStatus>('idle')
 
   useEffect(() => {
     if (!enabled) {
-      setCollab(null)
-      setSynced(false)
       return
     }
 
@@ -46,19 +48,30 @@ export function useYjs(
       disableBc: true,
       maxBackoffTime: 5000,
     })
+    let active = true
 
     const onSync = (isSynced: boolean) => setSynced(isSynced)
+    const onStatus = ({ status: nextStatus }: { status: CollabStatus }) => {
+      setStatus(nextStatus)
+      if (nextStatus !== 'connected') setSynced(false)
+    }
     provider.on('sync', onSync)
+    provider.on('status', onStatus)
 
-    setCollab({ ydoc, ytext, provider })
+    queueMicrotask(() => {
+      if (active) setCollab({ ydoc, ytext, provider })
+    })
 
     return () => {
+      active = false
       provider.off('sync', onSync)
+      provider.off('status', onStatus)
       provider.awareness.setLocalState(null)
       provider.destroy()
       ydoc.destroy()
       setCollab(null)
       setSynced(false)
+      setStatus('idle')
     }
   }, [enabled, room])
 
@@ -74,5 +87,5 @@ export function useYjs(
     })
   }, [enabled, collab, displayName, color, avatarUrl])
 
-  return { collab, synced }
+  return { collab, synced, status }
 }

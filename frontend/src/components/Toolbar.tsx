@@ -163,6 +163,7 @@ function applyAlignment(view: EditorView, align: TextAlignment) {
 
 export type ToolbarProps = {
   view: EditorView | null
+  disabled?: boolean
   onAction?: (text: string) => void
 }
 
@@ -268,8 +269,8 @@ function TableMenu({ disabled, onPick }: TableMenuProps) {
   )
 }
 
-export function Toolbar({ view, onAction }: ToolbarProps) {
-  const disabled = !view
+export function Toolbar({ view, disabled: disabledProp = false, onAction }: ToolbarProps) {
+  const disabled = disabledProp || !view
   const done = () => {
     if (!view || !onAction) return
     onAction(view.state.doc.toString())

@@ -62,7 +62,9 @@ export default function App() {
   const [splitPct, setSplitPct] = useState(52)
   const dragRef = useRef<{ startX: number; startPct: number; width: number } | null>(null)
 
-  const { collab, synced } = useYjs(joined, room, displayName, color, avatarUrl)
+  const { collab, synced, status } = useYjs(joined, room, displayName, color, avatarUrl)
+  const canEdit = status === 'connected' && synced
+  const syncMessage = status === 'disconnected' ? '连接断开，已暂停编辑' : '正在同步文档…'
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -327,10 +329,10 @@ export default function App() {
           <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-500 dark:bg-slate-800 dark:text-slate-400">
             <Hash size={9} className="inline -mt-px" />{room}
           </span>
-          {!synced && (
+          {!canEdit && (
             <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400">
               <span className="h-1 w-1 animate-pulse rounded-full bg-amber-500" />
-              同步中
+              {syncMessage}
             </span>
           )}
         </div>
@@ -377,7 +379,7 @@ export default function App() {
       </header>
 
       {/* ── Toolbar ────────────────────────────────── */}
-      <Toolbar view={editorView} onAction={postTimeline} />
+      <Toolbar view={editorView} disabled={!canEdit} onAction={postTimeline} />
 
       {/* ── Editor + Preview ───────────────────────── */}
       <div
@@ -390,15 +392,25 @@ export default function App() {
           className="flex min-h-0 min-w-0 flex-col border-r border-slate-200/50 dark:border-slate-800/50"
           style={{ flexBasis: `${splitPct}%`, flexGrow: 0, flexShrink: 0 }}
         >
-          <div className="min-h-0 flex-1 overflow-hidden">
+          <div className="relative min-h-0 flex-1 overflow-hidden">
             <Editor
               key={room}
               ytext={collab.ytext}
               awareness={collab.provider.awareness}
               dark={dark}
+              readOnly={!canEdit}
               onViewChange={onViewChange}
               onLocalEdit={postTimeline}
             />
+            {!canEdit && (
+              <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/70 px-6 backdrop-blur-[1px] dark:bg-slate-950/70">
+                <div className="max-w-xs rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center text-xs leading-relaxed text-amber-800 shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                  {syncMessage}
+                  <br />
+                  为避免未同步内容被旧状态覆盖，完成同步后再开始输入。
+                </div>
+              </div>
+            )}
           </div>
         </section>
 

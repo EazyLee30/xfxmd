@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { Compartment, EditorState, Transaction } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { basicSetup } from 'codemirror'
@@ -28,18 +28,31 @@ export type EditorProps = {
   ytext: Y.Text
   awareness: Awareness
   dark: boolean
+  readOnly?: boolean
   onViewChange: (view: EditorView | null) => void
   onLocalEdit?: (text: string) => void
 }
 
-export function Editor({ ytext, awareness, dark, onViewChange, onLocalEdit }: EditorProps) {
+export function Editor({ ytext, awareness, dark, readOnly = false, onViewChange, onLocalEdit }: EditorProps) {
   const parentRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
-  const themeComp = useRef(new Compartment()).current
+  const themeComp = useMemo(() => new Compartment(), [])
+  const editableComp = useMemo(() => new Compartment(), [])
   const darkRef = useRef(dark)
-  darkRef.current = dark
+  const readOnlyRef = useRef(readOnly)
   const onViewChangeRef = useRef(onViewChange)
-  onViewChangeRef.current = onViewChange
+
+  useEffect(() => {
+    darkRef.current = dark
+  }, [dark])
+
+  useEffect(() => {
+    readOnlyRef.current = readOnly
+  }, [readOnly])
+
+  useEffect(() => {
+    onViewChangeRef.current = onViewChange
+  }, [onViewChange])
 
   useEffect(() => {
     const parent = parentRef.current
@@ -52,6 +65,10 @@ export function Editor({ ytext, awareness, dark, onViewChange, onLocalEdit }: Ed
         markdown(),
         yCollab(ytext, awareness, { undoManager: false }),
         themeComp.of(darkRef.current ? oneDark : lightTheme),
+        editableComp.of([
+          EditorState.readOnly.of(readOnlyRef.current),
+          EditorView.editable.of(!readOnlyRef.current),
+        ]),
         EditorView.updateListener.of((vu) => {
           if (!vu.docChanged) return
           const isLocalEdit = vu.transactions.some((tr) => tr.annotation(Transaction.userEvent) != null)
@@ -72,7 +89,7 @@ export function Editor({ ytext, awareness, dark, onViewChange, onLocalEdit }: Ed
       onViewChangeRef.current(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only recreate on collab identity
-  }, [ytext, awareness, themeComp])
+  }, [ytext, awareness, themeComp, editableComp])
 
   useEffect(() => {
     const v = viewRef.current
@@ -81,6 +98,17 @@ export function Editor({ ytext, awareness, dark, onViewChange, onLocalEdit }: Ed
       effects: themeComp.reconfigure(dark ? oneDark : lightTheme),
     })
   }, [dark, themeComp])
+
+  useEffect(() => {
+    const v = viewRef.current
+    if (!v) return
+    v.dispatch({
+      effects: editableComp.reconfigure([
+        EditorState.readOnly.of(readOnly),
+        EditorView.editable.of(!readOnly),
+      ]),
+    })
+  }, [editableComp, readOnly])
 
   return <div ref={parentRef} className="h-full min-h-0 w-full overflow-hidden" />
 }
