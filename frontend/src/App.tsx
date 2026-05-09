@@ -33,6 +33,63 @@ function readDefaultRoom(): string {
   return 'default'
 }
 
+type LocalDraft = {
+  room: string
+  text: string
+  updatedAt: number
+  restoredAt: number
+}
+
+const DRAFT_RESTORE_WINDOW_MS = 10 * 60 * 1000
+const DRAFT_RESTORE_COOLDOWN_MS = 2000
+const DRAFT_RESTORE_ORIGIN = 'xfxmd-local-draft-restore'
+
+type YTextTransaction = {
+  local?: boolean
+  origin?: unknown
+}
+
+function draftStorageKey(room: string): string {
+  return `xfxmd:local-draft:${encodeURIComponent(room)}`
+}
+
+function readStoredDraft(room: string): LocalDraft | null {
+  try {
+    const raw = window.localStorage.getItem(draftStorageKey(room))
+    if (!raw) return null
+    const draft = JSON.parse(raw) as Partial<LocalDraft>
+    if (draft.room !== room || typeof draft.text !== 'string') return null
+    if (typeof draft.updatedAt !== 'number' || typeof draft.restoredAt !== 'number') return null
+    return draft as LocalDraft
+  } catch {
+    return null
+  }
+}
+
+function writeStoredDraft(draft: LocalDraft) {
+  try {
+    if (draft.text.trim().length === 0) {
+      window.localStorage.removeItem(draftStorageKey(draft.room))
+      return
+    }
+    window.localStorage.setItem(draftStorageKey(draft.room), JSON.stringify(draft))
+  } catch {
+    // Local draft restore is best-effort; editing must keep working without storage access.
+  }
+}
+
+function shouldRestoreLocalDraft(draft: LocalDraft | null, room: string, nextText: string): boolean {
+  if (!draft || draft.room !== room || draft.text === nextText) return false
+  const now = Date.now()
+  if (now - draft.updatedAt > DRAFT_RESTORE_WINDOW_MS) return false
+  if (now - draft.restoredAt < DRAFT_RESTORE_COOLDOWN_MS) return false
+  if (draft.text.trim().length === 0) return false
+
+  const droppedChars = draft.text.length - nextText.length
+  const minDrop = Math.max(8, Math.floor(draft.text.length * 0.25))
+  return nextText.trim().length === 0 || droppedChars >= minDrop
+}
+
 export default function App() {
   // Admin route
   if (location.pathname === '/admin') {
@@ -55,8 +112,12 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [timeline, setTimeline] = useState<TimelineItem[]>([])
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([])
+  const [restoreNotice, setRestoreNotice] = useState('')
   const lastLoggedTextRef = useRef('')
+  const localDraftRef = useRef<LocalDraft | null>(null)
+  const localInputUntilRef = useRef(0)
   const postTimerRef = useRef<number | null>(null)
+  const restoreNoticeTimerRef = useRef<number | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
   const [splitPct, setSplitPct] = useState(52)
@@ -64,7 +125,31 @@ export default function App() {
 
   const { collab, synced, status } = useYjs(joined, room, displayName, color, avatarUrl)
   const canEdit = status === 'connected' && synced
+  const editorReady = canEdit
   const syncMessage = status === 'disconnected' ? '连接断开，已暂停编辑' : '正在同步文档…'
+
+  const rememberLocalDraft = useCallback((text: string, restoredAt = 0) => {
+    const draft = {
+      room,
+      text,
+      updatedAt: Date.now(),
+      restoredAt,
+    }
+    localDraftRef.current = draft
+    writeStoredDraft(draft)
+    return draft
+  }, [room])
+
+  const readLocalDraft = useCallback(() => {
+    if (localDraftRef.current?.room === room) return localDraftRef.current
+    const draft = readStoredDraft(room)
+    localDraftRef.current = draft
+    return draft
+  }, [room])
+
+  const markLocalInput = useCallback(() => {
+    localInputUntilRef.current = Date.now() + 250
+  }, [])
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -84,19 +169,55 @@ export default function App() {
   }, [dark])
 
   useEffect(() => {
+    localDraftRef.current = readStoredDraft(room)
+  }, [room])
+
+  useEffect(() => {
     if (!collab) {
       setMdText('')
       setTimeline([])
       setOnlineUsers([])
       return
     }
-    const upd = () => setMdText(collab.ytext.toString())
+    const upd = (_event?: unknown, transaction?: YTextTransaction) => {
+      const nextText = collab.ytext.toString()
+      setMdText(nextText)
+
+      if (transaction?.local) {
+        const restoredAt = transaction.origin === DRAFT_RESTORE_ORIGIN ? (localDraftRef.current?.restoredAt ?? Date.now()) : 0
+        rememberLocalDraft(nextText, restoredAt)
+        return
+      }
+
+      if (document.hasFocus() && Date.now() < localInputUntilRef.current) {
+        rememberLocalDraft(nextText)
+        return
+      }
+
+      const draft = readLocalDraft()
+      if (!draft || !synced || !shouldRestoreLocalDraft(draft, room, nextText)) {
+        return
+      }
+
+      const draftText = draft.text
+      localDraftRef.current = { ...draft, restoredAt: Date.now() }
+      queueMicrotask(() => {
+        if (collab.ytext.toString() !== nextText) return
+        collab.ydoc.transact(() => {
+          collab.ytext.delete(0, collab.ytext.length)
+          collab.ytext.insert(0, draftText)
+        }, DRAFT_RESTORE_ORIGIN)
+        setRestoreNotice('已从本地草稿恢复')
+        if (restoreNoticeTimerRef.current) window.clearTimeout(restoreNoticeTimerRef.current)
+        restoreNoticeTimerRef.current = window.setTimeout(() => setRestoreNotice(''), 2500)
+      })
+    }
     upd()
     collab.ytext.observe(upd)
     return () => {
       collab.ytext.unobserve(upd)
     }
-  }, [collab])
+  }, [collab, readLocalDraft, rememberLocalDraft, room, synced])
 
   useEffect(() => {
     lastLoggedTextRef.current = mdText
@@ -150,6 +271,7 @@ export default function App() {
   useEffect(() => {
     return () => {
       if (postTimerRef.current) window.clearTimeout(postTimerRef.current)
+      if (restoreNoticeTimerRef.current) window.clearTimeout(restoreNoticeTimerRef.current)
     }
   }, [])
 
@@ -199,6 +321,14 @@ export default function App() {
       }, 600)
     },
     [displayName, room, summarizeEdit],
+  )
+
+  const onLocalEdit = useCallback(
+    (newText: string) => {
+      rememberLocalDraft(newText)
+      postTimeline(newText)
+    },
+    [postTimeline, rememberLocalDraft],
   )
 
   const onSplitPointerDown = (e: React.PointerEvent) => {
@@ -335,6 +465,12 @@ export default function App() {
               {syncMessage}
             </span>
           )}
+          {restoreNotice && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-teal-700 dark:text-teal-300">
+              <span className="h-1 w-1 rounded-full bg-teal-500" />
+              {restoreNotice}
+            </span>
+          )}
         </div>
 
         {/* Center: users (hidden on narrow screens) */}
@@ -379,7 +515,7 @@ export default function App() {
       </header>
 
       {/* ── Toolbar ────────────────────────────────── */}
-      <Toolbar view={editorView} disabled={!canEdit} onAction={postTimeline} />
+      <Toolbar view={editorReady ? editorView : null} disabled={!canEdit} onAction={onLocalEdit} />
 
       {/* ── Editor + Preview ───────────────────────── */}
       <div
@@ -393,21 +529,23 @@ export default function App() {
           style={{ flexBasis: `${splitPct}%`, flexGrow: 0, flexShrink: 0 }}
         >
           <div className="relative min-h-0 flex-1 overflow-hidden">
-            <Editor
-              key={room}
-              ytext={collab.ytext}
-              awareness={collab.provider.awareness}
-              dark={dark}
-              readOnly={!canEdit}
-              onViewChange={onViewChange}
-              onLocalEdit={postTimeline}
-            />
-            {!canEdit && (
-              <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/70 px-6 backdrop-blur-[1px] dark:bg-slate-950/70">
+            {editorReady ? (
+              <Editor
+                key={room}
+                ytext={collab.ytext}
+                awareness={collab.provider.awareness}
+                dark={dark}
+                readOnly={!canEdit}
+                onViewChange={onViewChange}
+                onBeforeLocalEdit={markLocalInput}
+                onLocalEdit={onLocalEdit}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center bg-slate-50 px-6 dark:bg-slate-950">
                 <div className="max-w-xs rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center text-xs leading-relaxed text-amber-800 shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
                   {syncMessage}
                   <br />
-                  为避免未同步内容被旧状态覆盖，完成同步后再开始输入。
+                  正在等待协作文档完成同步，完成后再载入编辑器。
                 </div>
               </div>
             )}

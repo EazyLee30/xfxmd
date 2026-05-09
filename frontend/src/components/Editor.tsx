@@ -30,10 +30,11 @@ export type EditorProps = {
   dark: boolean
   readOnly?: boolean
   onViewChange: (view: EditorView | null) => void
+  onBeforeLocalEdit?: () => void
   onLocalEdit?: (text: string) => void
 }
 
-export function Editor({ ytext, awareness, dark, readOnly = false, onViewChange, onLocalEdit }: EditorProps) {
+export function Editor({ ytext, awareness, dark, readOnly = false, onViewChange, onBeforeLocalEdit, onLocalEdit }: EditorProps) {
   const parentRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const themeComp = useMemo(() => new Compartment(), [])
@@ -41,6 +42,7 @@ export function Editor({ ytext, awareness, dark, readOnly = false, onViewChange,
   const darkRef = useRef(dark)
   const readOnlyRef = useRef(readOnly)
   const onViewChangeRef = useRef(onViewChange)
+  const onBeforeLocalEditRef = useRef(onBeforeLocalEdit)
 
   useEffect(() => {
     darkRef.current = dark
@@ -55,27 +57,50 @@ export function Editor({ ytext, awareness, dark, readOnly = false, onViewChange,
   }, [onViewChange])
 
   useEffect(() => {
+    onBeforeLocalEditRef.current = onBeforeLocalEdit
+  }, [onBeforeLocalEdit])
+
+  useEffect(() => {
     const parent = parentRef.current
     if (!parent) return
+
+    const markLocalEdit = () => {
+      onBeforeLocalEditRef.current?.()
+      return false
+    }
+
+    const localEditListener = EditorView.updateListener.of((vu) => {
+      if (!vu.docChanged) return
+      const isLocalEdit = vu.transactions.some((tr) => tr.annotation(Transaction.userEvent) != null)
+      if (isLocalEdit && onLocalEdit) {
+        onLocalEdit(vu.state.doc.toString())
+      }
+    })
 
     const state = EditorState.create({
       doc: ytext.toString(),
       extensions: [
         basicSetup,
         markdown(),
+        EditorView.domEventHandlers({
+          beforeinput: markLocalEdit,
+          cut: markLocalEdit,
+          drop: markLocalEdit,
+          paste: markLocalEdit,
+          keydown: (event) => {
+            if (event.key === 'Backspace' || event.key === 'Delete' || event.key === 'Enter' || event.key.length === 1) {
+              onBeforeLocalEditRef.current?.()
+            }
+            return false
+          },
+        }),
+        localEditListener,
         yCollab(ytext, awareness, { undoManager: false }),
         themeComp.of(darkRef.current ? oneDark : lightTheme),
         editableComp.of([
           EditorState.readOnly.of(readOnlyRef.current),
           EditorView.editable.of(!readOnlyRef.current),
         ]),
-        EditorView.updateListener.of((vu) => {
-          if (!vu.docChanged) return
-          const isLocalEdit = vu.transactions.some((tr) => tr.annotation(Transaction.userEvent) != null)
-          if (isLocalEdit && onLocalEdit) {
-            onLocalEdit(vu.state.doc.toString())
-          }
-        }),
       ],
     })
 
