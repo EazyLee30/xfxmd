@@ -10,6 +10,17 @@ export function yjsBaseUrl(): string {
   return `${proto}//${location.host}/yjs`
 }
 
+async function readRoomDeletedAt(room: string): Promise<number> {
+  try {
+    const res = await fetch(`/api/room/${encodeURIComponent(room)}/info`)
+    if (!res.ok) return 0
+    const data = (await res.json()) as { deletedAt?: number }
+    return typeof data.deletedAt === 'number' ? data.deletedAt : 0
+  } catch {
+    return 0
+  }
+}
+
 export type CollabBundle = {
   ydoc: Y.Doc
   ytext: Y.Text
@@ -31,13 +42,37 @@ export function useYjs(
   collab: CollabBundle | null
   synced: boolean
   status: CollabStatus
+  ready: boolean
 } {
   const [collab, setCollab] = useState<CollabBundle | null>(null)
   const [synced, setSynced] = useState(false)
+  const [ready, setReady] = useState(false)
   const [status, setStatus] = useState<CollabStatus>('idle')
+  const [resetAt, setResetAt] = useState<number | null>(null)
 
   useEffect(() => {
     if (!enabled) {
+      setResetAt(null)
+      setReady(false)
+      setSynced(false)
+      setStatus('idle')
+      return
+    }
+
+    let active = true
+    setStatus('connecting')
+    setResetAt(null)
+    void readRoomDeletedAt(room).then((deletedAt) => {
+      if (active) setResetAt(deletedAt)
+    })
+
+    return () => {
+      active = false
+    }
+  }, [enabled, room])
+
+  useEffect(() => {
+    if (!enabled || resetAt === null) {
       return
     }
 
@@ -47,16 +82,37 @@ export function useYjs(
       connect: true,
       disableBc: true,
       maxBackoffTime: 5000,
+      resyncInterval: 15000,
+      params: resetAt > 0 ? { resetAt: String(resetAt) } : {},
     })
     let active = true
+    let checkingReset = false
 
-    const onSync = (isSynced: boolean) => setSynced(isSynced)
+    const refreshResetAt = () => {
+      if (checkingReset) return
+      checkingReset = true
+      void readRoomDeletedAt(room).then((deletedAt) => {
+        checkingReset = false
+        if (active && deletedAt > resetAt) {
+          setResetAt(deletedAt)
+        }
+      })
+    }
+
+    const onSync = (isSynced: boolean) => {
+      setSynced(isSynced)
+      if (isSynced) setReady(true)
+    }
     const onStatus = ({ status: nextStatus }: { status: CollabStatus }) => {
       setStatus(nextStatus)
-      if (nextStatus !== 'connected') setSynced(false)
+      if (nextStatus !== 'connected') {
+        setSynced(false)
+        refreshResetAt()
+      }
     }
     provider.on('sync', onSync)
     provider.on('status', onStatus)
+    provider.on('connection-error', refreshResetAt)
 
     queueMicrotask(() => {
       if (active) setCollab({ ydoc, ytext, provider })
@@ -66,14 +122,16 @@ export function useYjs(
       active = false
       provider.off('sync', onSync)
       provider.off('status', onStatus)
+      provider.off('connection-error', refreshResetAt)
       provider.awareness.setLocalState(null)
       provider.destroy()
       ydoc.destroy()
       setCollab(null)
       setSynced(false)
+      setReady(false)
       setStatus('idle')
     }
-  }, [enabled, room])
+  }, [enabled, room, resetAt])
 
   useEffect(() => {
     if (!enabled || !collab) return
@@ -87,5 +145,5 @@ export function useYjs(
     })
   }, [enabled, collab, displayName, color, avatarUrl])
 
-  return { collab, synced, status }
+  return { collab, synced, status, ready }
 }

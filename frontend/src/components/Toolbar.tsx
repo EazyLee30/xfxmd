@@ -164,7 +164,7 @@ function applyAlignment(view: EditorView, align: TextAlignment) {
 export type ToolbarProps = {
   view: EditorView | null
   disabled?: boolean
-  onAction?: (text: string) => void
+  onAction?: (text: string, beforeText?: string) => void
 }
 
 const btn =
@@ -271,20 +271,26 @@ function TableMenu({ disabled, onPick }: TableMenuProps) {
 
 export function Toolbar({ view, disabled: disabledProp = false, onAction }: ToolbarProps) {
   const disabled = disabledProp || !view
-  const done = () => {
+  const done = (beforeText?: string) => {
     if (!view || !onAction) return
-    onAction(view.state.doc.toString())
+    onAction(view.state.doc.toString(), beforeText)
+  }
+  const apply = (action: () => void) => {
+    if (!view) return
+    const beforeText = view.state.doc.toString()
+    action()
+    done(beforeText)
   }
 
   return (
     <div className="flex shrink-0 items-center gap-0.5 border-b border-slate-200/80 bg-white/60 px-2.5 py-1.5 dark:border-slate-800/80 dark:bg-slate-950/40">
-      <button type="button" disabled={disabled} data-tooltip="粗体 ⌘B" className={btn} onClick={() => view && (wrap(view, '**'), done())}>
+      <button type="button" disabled={disabled} data-tooltip="粗体 ⌘B" className={btn} onClick={() => apply(() => view && wrap(view, '**'))}>
         <Bold size={15} strokeWidth={2.2} />
       </button>
-      <button type="button" disabled={disabled} data-tooltip="斜体 ⌘I" className={btn} onClick={() => view && (wrap(view, '*'), done())}>
+      <button type="button" disabled={disabled} data-tooltip="斜体 ⌘I" className={btn} onClick={() => apply(() => view && wrap(view, '*'))}>
         <Italic size={15} strokeWidth={2.2} />
       </button>
-      <button type="button" disabled={disabled} data-tooltip="行内代码" className={btn} onClick={() => view && (wrap(view, '`'), done())}>
+      <button type="button" disabled={disabled} data-tooltip="行内代码" className={btn} onClick={() => apply(() => view && wrap(view, '`'))}>
         <Code size={15} strokeWidth={2.2} />
       </button>
       <ColorMenu
@@ -292,55 +298,55 @@ export function Toolbar({ view, disabled: disabledProp = false, onAction }: Tool
         tooltip="字体颜色"
         icon={<Type size={15} strokeWidth={2.2} />}
         options={TEXT_COLOR_OPTIONS}
-        onPick={(key) => view && (wrapRichStyle(view, 'color', key), done())}
+        onPick={(key) => apply(() => view && wrapRichStyle(view, 'color', key))}
       />
       <ColorMenu
         disabled={disabled}
         tooltip="高光"
         icon={<Highlighter size={15} strokeWidth={2.2} />}
         options={HIGHLIGHT_COLOR_OPTIONS}
-        onPick={(key) => view && (wrapRichStyle(view, 'mark', key), done())}
+        onPick={(key) => apply(() => view && wrapRichStyle(view, 'mark', key))}
       />
 
       <div className={divider} />
 
-      <button type="button" disabled={disabled} data-tooltip="一级标题" className={btn} onClick={() => view && (insertPrefixLine(view, '# '), done())}>
+      <button type="button" disabled={disabled} data-tooltip="一级标题" className={btn} onClick={() => apply(() => view && insertPrefixLine(view, '# '))}>
         <Heading1 size={15} strokeWidth={2.2} />
       </button>
-      <button type="button" disabled={disabled} data-tooltip="二级标题" className={btn} onClick={() => view && (insertPrefixLine(view, '## '), done())}>
+      <button type="button" disabled={disabled} data-tooltip="二级标题" className={btn} onClick={() => apply(() => view && insertPrefixLine(view, '## '))}>
         <Heading2 size={15} strokeWidth={2.2} />
       </button>
-      <button type="button" disabled={disabled} data-tooltip="三级标题" className={btn} onClick={() => view && (insertPrefixLine(view, '### '), done())}>
+      <button type="button" disabled={disabled} data-tooltip="三级标题" className={btn} onClick={() => apply(() => view && insertPrefixLine(view, '### '))}>
         <Heading3 size={15} strokeWidth={2.2} />
       </button>
-      <button type="button" disabled={disabled} data-tooltip="正文/段落" className={btn} onClick={() => view && (applyParagraph(view), done())}>
+      <button type="button" disabled={disabled} data-tooltip="正文/段落" className={btn} onClick={() => apply(() => view && applyParagraph(view))}>
         <Pilcrow size={15} strokeWidth={2.2} />
       </button>
 
       <div className={divider} />
 
-      <button type="button" disabled={disabled} data-tooltip="左对齐" className={btn} onClick={() => view && (applyAlignment(view, 'left'), done())}>
+      <button type="button" disabled={disabled} data-tooltip="左对齐" className={btn} onClick={() => apply(() => view && applyAlignment(view, 'left'))}>
         <TextAlignStart size={15} strokeWidth={2.2} />
       </button>
-      <button type="button" disabled={disabled} data-tooltip="居中对齐" className={btn} onClick={() => view && (applyAlignment(view, 'center'), done())}>
+      <button type="button" disabled={disabled} data-tooltip="居中对齐" className={btn} onClick={() => apply(() => view && applyAlignment(view, 'center'))}>
         <TextAlignCenter size={15} strokeWidth={2.2} />
       </button>
-      <button type="button" disabled={disabled} data-tooltip="右对齐" className={btn} onClick={() => view && (applyAlignment(view, 'right'), done())}>
+      <button type="button" disabled={disabled} data-tooltip="右对齐" className={btn} onClick={() => apply(() => view && applyAlignment(view, 'right'))}>
         <TextAlignEnd size={15} strokeWidth={2.2} />
       </button>
 
       <div className={divider} />
 
-      <button type="button" disabled={disabled} data-tooltip="无序列表" className={btn} onClick={() => view && (insertPrefixLine(view, '- '), done())}>
+      <button type="button" disabled={disabled} data-tooltip="无序列表" className={btn} onClick={() => apply(() => view && insertPrefixLine(view, '- '))}>
         <List size={15} strokeWidth={2.2} />
       </button>
-      <button type="button" disabled={disabled} data-tooltip="有序列表" className={btn} onClick={() => view && (insertPrefixLine(view, '1. '), done())}>
+      <button type="button" disabled={disabled} data-tooltip="有序列表" className={btn} onClick={() => apply(() => view && insertPrefixLine(view, '1. '))}>
         <ListOrdered size={15} strokeWidth={2.2} />
       </button>
-      <button type="button" disabled={disabled} data-tooltip="引用" className={btn} onClick={() => view && (insertPrefixLine(view, '> '), done())}>
+      <button type="button" disabled={disabled} data-tooltip="引用" className={btn} onClick={() => apply(() => view && insertPrefixLine(view, '> '))}>
         <Quote size={15} strokeWidth={2.2} />
       </button>
-      <TableMenu disabled={disabled} onPick={(rows, cols) => view && (insertBlock(view, buildMarkdownTable(rows, cols)), done())} />
+      <TableMenu disabled={disabled} onPick={(rows, cols) => apply(() => view && insertBlock(view, buildMarkdownTable(rows, cols)))} />
 
       <div className={divider} />
 
@@ -354,6 +360,7 @@ export function Toolbar({ view, disabled: disabledProp = false, onAction }: Tool
           const label = window.prompt('链接文字（可选）', '')
           const url = window.prompt('URL', 'https://')
           if (!url) return
+          const beforeText = view.state.doc.toString()
           const { from, to } = view.state.selection.main
           const inner = label?.trim() || view.state.sliceDoc(from, to) || url
           const md = `[${inner}](${url})`
@@ -362,7 +369,7 @@ export function Toolbar({ view, disabled: disabledProp = false, onAction }: Tool
             selection: { anchor: from + md.length },
           })
           view.focus()
-          done()
+          done(beforeText)
         }}
       >
         <Link size={15} strokeWidth={2.2} />
@@ -377,8 +384,7 @@ export function Toolbar({ view, disabled: disabledProp = false, onAction }: Tool
           const url = window.prompt('图片 URL', 'https://')
           if (!url) return
           const alt = window.prompt('替代文字', 'image') || 'image'
-          insertBlock(view, `![${alt}](${url})`)
-          done()
+          apply(() => insertBlock(view, `![${alt}](${url})`))
         }}
       >
         <ImageIcon size={15} strokeWidth={2.2} />
@@ -390,13 +396,12 @@ export function Toolbar({ view, disabled: disabledProp = false, onAction }: Tool
         className={btn}
         onClick={() => {
           if (!view) return
-          insertBlock(view, '\n```\n\n```\n')
-          done()
+          apply(() => insertBlock(view, '\n```\n\n```\n'))
         }}
       >
         <CodeSquare size={15} strokeWidth={2.2} />
       </button>
-      <button type="button" disabled={disabled} data-tooltip="分隔线" className={btn} onClick={() => view && (insertBlock(view, '\n---\n'), done())}>
+      <button type="button" disabled={disabled} data-tooltip="分隔线" className={btn} onClick={() => apply(() => view && insertBlock(view, '\n---\n'))}>
         <Minus size={15} strokeWidth={2.2} />
       </button>
     </div>

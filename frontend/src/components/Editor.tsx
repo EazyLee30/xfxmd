@@ -30,7 +30,7 @@ export type EditorProps = {
   dark: boolean
   readOnly?: boolean
   onViewChange: (view: EditorView | null) => void
-  onBeforeLocalEdit?: () => void
+  onBeforeLocalEdit?: (text: string) => void
   onLocalEdit?: (text: string) => void
 }
 
@@ -64,8 +64,8 @@ export function Editor({ ytext, awareness, dark, readOnly = false, onViewChange,
     const parent = parentRef.current
     if (!parent) return
 
-    const markLocalEdit = () => {
-      onBeforeLocalEditRef.current?.()
+    const markLocalEdit = (_event: Event, view: EditorView) => {
+      onBeforeLocalEditRef.current?.(view.state.doc.toString())
       return false
     }
 
@@ -87,9 +87,9 @@ export function Editor({ ytext, awareness, dark, readOnly = false, onViewChange,
           cut: markLocalEdit,
           drop: markLocalEdit,
           paste: markLocalEdit,
-          keydown: (event) => {
+          keydown: (event, view) => {
             if (event.key === 'Backspace' || event.key === 'Delete' || event.key === 'Enter' || event.key.length === 1) {
-              onBeforeLocalEditRef.current?.()
+              onBeforeLocalEditRef.current?.(view.state.doc.toString())
             }
             return false
           },

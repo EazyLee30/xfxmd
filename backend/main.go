@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"errors"
 	"io/fs"
 	"log"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
+	"github.com/reearth/ygo/crdt"
 	"github.com/reearth/ygo/provider/websocket"
 
 	"github.com/eazylee/xfxmd/backend/persistence"
@@ -26,6 +28,7 @@ type roomInfoResponse struct {
 	Room        string `json:"room"`
 	Persistence string `json:"persistence"`
 	MaxWS       int    `json:"maxWebsocketConnections"`
+	DeletedAt   int64  `json:"deletedAt,omitempty"`
 }
 
 type timelinePostRequest struct {
@@ -85,10 +88,16 @@ func main() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid room"})
 			return
 		}
+		deletedAt, err := store.DeletedAt(id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusOK, roomInfoResponse{
 			Room:        id,
 			Persistence: dataDir,
 			MaxWS:       wsSrv.MaxConnections,
+			DeletedAt:   deletedAt,
 		})
 	})
 
@@ -190,16 +199,54 @@ func main() {
 		admin.DELETE("/rooms/:id", func(c *gin.Context) {
 			id := c.Param("id")
 			key := room.Normalize(id)
-			path := store.Dir + "/" + key + ".yjs"
-			if err := os.Remove(path); err != nil {
-				if os.IsNotExist(err) {
-					c.JSON(http.StatusNotFound, gin.H{"error": "room not found"})
-					return
-				}
+			if !room.IsValid(key) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid room"})
+				return
+			}
+
+			hasLiveRoom := wsSrv.GetDoc(key) != nil
+			hasStoredDoc, err := store.HasDoc(key)
+			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
-			c.JSON(http.StatusOK, gin.H{"ok": true, "deleted": key})
+			if !hasLiveRoom && !hasStoredDoc {
+				c.JSON(http.StatusNotFound, gin.H{"error": "room not found"})
+				return
+			}
+
+			deletedAt := time.Now().UnixMilli()
+			if err := store.MarkDeleted(key, deletedAt); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+
+			if hasLiveRoom {
+				err := wsSrv.Apply(c.Request.Context(), key, func(doc *crdt.Doc, transact func(func(*crdt.Transaction))) {
+					txt := doc.GetText("markdown")
+					if txt.Len() == 0 {
+						return
+					}
+					transact(func(txn *crdt.Transaction) {
+						txt.Delete(txn, 0, txt.Len())
+					})
+				})
+				if err != nil && !errors.Is(err, websocket.ErrNoChanges) && !errors.Is(err, websocket.ErrRoomNotFound) {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+
+				if err := wsSrv.CloseRoom(key, true); err != nil && !errors.Is(err, websocket.ErrRoomNotFound) {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+			}
+
+			if _, err := store.DeleteDoc(key, deletedAt); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"ok": true, "deleted": key, "deletedAt": deletedAt})
 		})
 	}
 
@@ -207,6 +254,16 @@ func main() {
 		rm := c.Param("room")
 		if rm == "" {
 			rm = c.Param("Room")
+		}
+		deletedAt, err := store.DeletedAt(rm)
+		if err != nil {
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		resetAt, _ := strconv.ParseInt(c.Query("resetAt"), 10, 64)
+		if deletedAt > 0 && resetAt < deletedAt {
+			c.AbortWithStatus(http.StatusConflict)
+			return
 		}
 		req := c.Request.Clone(c.Request.Context())
 		req.SetPathValue("room", rm)

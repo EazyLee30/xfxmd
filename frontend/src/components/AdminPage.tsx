@@ -10,6 +10,17 @@ interface RoomInfo {
   size: number
 }
 
+async function readRoomDeletedAt(roomName: string): Promise<number> {
+  try {
+    const res = await fetch(`/api/room/${encodeURIComponent(roomName)}/info`)
+    if (!res.ok) return 0
+    const data = (await res.json()) as { deletedAt?: number }
+    return typeof data.deletedAt === 'number' ? data.deletedAt : 0
+  } catch {
+    return 0
+  }
+}
+
 export function AdminPage() {
   const [token, setToken] = useState('')
   const [inputToken, setInputToken] = useState('')
@@ -67,11 +78,13 @@ export function AdminPage() {
       const ydoc = new Y.Doc()
       const ytext = ydoc.getText('markdown')
       let synced = false
+      const resetAt = await readRoomDeletedAt(roomName)
 
       const provider = new WebsocketProvider(yjsBaseUrl(), roomName, ydoc, {
         connect: true,
         disableBc: true,
         maxBackoffTime: 5000,
+        params: resetAt > 0 ? { resetAt: String(resetAt) } : {},
       })
 
       await new Promise<void>((resolve) => {

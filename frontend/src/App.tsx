@@ -69,12 +69,31 @@ function readStoredDraft(room: string): LocalDraft | null {
 function writeStoredDraft(draft: LocalDraft) {
   try {
     if (draft.text.trim().length === 0) {
-      window.localStorage.removeItem(draftStorageKey(draft.room))
+      removeStoredDraft(draft.room)
       return
     }
     window.localStorage.setItem(draftStorageKey(draft.room), JSON.stringify(draft))
   } catch {
     // Local draft restore is best-effort; editing must keep working without storage access.
+  }
+}
+
+function removeStoredDraft(room: string) {
+  try {
+    window.localStorage.removeItem(draftStorageKey(room))
+  } catch {
+    // ignore storage access issues
+  }
+}
+
+async function readRoomDeletedAt(room: string): Promise<number> {
+  try {
+    const res = await fetch(`/api/room/${encodeURIComponent(room)}/info`)
+    if (!res.ok) return 0
+    const data = (await res.json()) as { deletedAt?: number }
+    return typeof data.deletedAt === 'number' ? data.deletedAt : 0
+  } catch {
+    return 0
   }
 }
 
@@ -88,6 +107,51 @@ function shouldRestoreLocalDraft(draft: LocalDraft | null, room: string, nextTex
   const droppedChars = draft.text.length - nextText.length
   const minDrop = Math.max(8, Math.floor(draft.text.length * 0.25))
   return nextText.trim().length === 0 || droppedChars >= minDrop
+}
+
+function compactEditPreview(text: string): string {
+  const compact = text
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(' / ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (!compact) return '空白'
+  return compact.length > 40 ? `${compact.slice(0, 40)}…` : compact
+}
+
+function diffTextParts(prev: string, next: string) {
+  let start = 0
+  while (start < prev.length && start < next.length && prev[start] === next[start]) start += 1
+
+  let prevEnd = prev.length
+  let nextEnd = next.length
+  while (prevEnd > start && nextEnd > start && prev[prevEnd - 1] === next[nextEnd - 1]) {
+    prevEnd -= 1
+    nextEnd -= 1
+  }
+
+  return {
+    inserted: next.slice(start, nextEnd),
+    deleted: prev.slice(start, prevEnd),
+  }
+}
+
+function summarizeEdit(prev: string, next: string): string {
+  if (prev === next) return '编辑文档'
+
+  const { inserted, deleted } = diffTextParts(prev, next)
+  if (inserted && !deleted) return `新增 ${inserted.length} 字符：${compactEditPreview(inserted)}`
+  if (!inserted && deleted) return `删除 ${deleted.length} 字符：${compactEditPreview(deleted)}`
+  if (inserted && deleted) return `修改 ${deleted.length}→${inserted.length} 字符：${compactEditPreview(inserted)}`
+
+  const diff = next.length - prev.length
+  if (diff > 0) return `新增 ${diff} 字符`
+  if (diff < 0) return `删除 ${Math.abs(diff)} 字符`
+  return '编辑文档'
 }
 
 export default function App() {
@@ -116,6 +180,10 @@ export default function App() {
   const lastLoggedTextRef = useRef('')
   const localDraftRef = useRef<LocalDraft | null>(null)
   const localInputUntilRef = useRef(0)
+  const draftRestoreCheckedRef = useRef(false)
+  const beforeLocalEditRef = useRef<string | null>(null)
+  const pendingTimelineBaseRef = useRef<string | null>(null)
+  const pendingTimelineNextRef = useRef('')
   const postTimerRef = useRef<number | null>(null)
   const restoreNoticeTimerRef = useRef<number | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -123,10 +191,10 @@ export default function App() {
   const [splitPct, setSplitPct] = useState(52)
   const dragRef = useRef<{ startX: number; startPct: number; width: number } | null>(null)
 
-  const { collab, synced, status } = useYjs(joined, room, displayName, color, avatarUrl)
-  const canEdit = status === 'connected' && synced
-  const editorReady = canEdit
-  const syncMessage = status === 'disconnected' ? '连接断开，已暂停编辑' : '正在同步文档…'
+  const { collab, synced, status, ready } = useYjs(joined, room, displayName, color, avatarUrl)
+  const editorReady = ready
+  const canEdit = editorReady
+  const syncMessage = status === 'disconnected' ? '连接断开，正在重连…' : '正在同步文档…'
 
   const rememberLocalDraft = useCallback((text: string, restoredAt = 0) => {
     const draft = {
@@ -147,8 +215,11 @@ export default function App() {
     return draft
   }, [room])
 
-  const markLocalInput = useCallback(() => {
+  const markLocalInput = useCallback((beforeText: string) => {
     localInputUntilRef.current = Date.now() + 250
+    if (pendingTimelineBaseRef.current === null && beforeLocalEditRef.current === null) {
+      beforeLocalEditRef.current = beforeText
+    }
   }, [])
 
   // Close dropdown on outside click
@@ -170,6 +241,7 @@ export default function App() {
 
   useEffect(() => {
     localDraftRef.current = readStoredDraft(room)
+    draftRestoreCheckedRef.current = false
   }, [room])
 
   useEffect(() => {
@@ -177,8 +249,10 @@ export default function App() {
       setMdText('')
       setTimeline([])
       setOnlineUsers([])
+      draftRestoreCheckedRef.current = false
       return
     }
+    let disposed = false
     const upd = (_event?: unknown, transaction?: YTextTransaction) => {
       const nextText = collab.ytext.toString()
       setMdText(nextText)
@@ -190,37 +264,57 @@ export default function App() {
       }
 
       if (document.hasFocus() && Date.now() < localInputUntilRef.current) {
-        rememberLocalDraft(nextText)
+        const draft = readLocalDraft()
+        if (!draft || nextText.length >= draft.text.length) {
+          rememberLocalDraft(nextText)
+        }
         return
       }
 
+      if (!synced || draftRestoreCheckedRef.current) {
+        return
+      }
+      draftRestoreCheckedRef.current = true
+
       const draft = readLocalDraft()
-      if (!draft || !synced || !shouldRestoreLocalDraft(draft, room, nextText)) {
+      if (!draft || !shouldRestoreLocalDraft(draft, room, nextText)) {
         return
       }
 
       const draftText = draft.text
       localDraftRef.current = { ...draft, restoredAt: Date.now() }
       queueMicrotask(() => {
-        if (collab.ytext.toString() !== nextText) return
-        collab.ydoc.transact(() => {
-          collab.ytext.delete(0, collab.ytext.length)
-          collab.ytext.insert(0, draftText)
-        }, DRAFT_RESTORE_ORIGIN)
-        setRestoreNotice('已从本地草稿恢复')
-        if (restoreNoticeTimerRef.current) window.clearTimeout(restoreNoticeTimerRef.current)
-        restoreNoticeTimerRef.current = window.setTimeout(() => setRestoreNotice(''), 2500)
+        void (async () => {
+          const deletedAt = await readRoomDeletedAt(room)
+          if (disposed) return
+          if (deletedAt > 0 && draft.updatedAt <= deletedAt) {
+            localDraftRef.current = null
+            removeStoredDraft(room)
+            return
+          }
+          if (collab.ytext.toString() !== nextText) return
+          collab.ydoc.transact(() => {
+            collab.ytext.delete(0, collab.ytext.length)
+            collab.ytext.insert(0, draftText)
+          }, DRAFT_RESTORE_ORIGIN)
+          setRestoreNotice('已从本地草稿恢复')
+          if (restoreNoticeTimerRef.current) window.clearTimeout(restoreNoticeTimerRef.current)
+          restoreNoticeTimerRef.current = window.setTimeout(() => setRestoreNotice(''), 2500)
+        })()
       })
     }
     upd()
     collab.ytext.observe(upd)
     return () => {
+      disposed = true
       collab.ytext.unobserve(upd)
     }
   }, [collab, readLocalDraft, rememberLocalDraft, room, synced])
 
   useEffect(() => {
-    lastLoggedTextRef.current = mdText
+    if (pendingTimelineBaseRef.current === null) {
+      lastLoggedTextRef.current = mdText
+    }
   }, [mdText])
 
   useEffect(() => {
@@ -275,7 +369,7 @@ export default function App() {
     }
   }, [])
 
-  useScrollSync(editorView, previewEl, Boolean(joined && synced && previewEl))
+  useScrollSync(editorView, previewEl, Boolean(joined && editorReady && previewEl))
 
   const onViewChange = useCallback((v: EditorView | null) => {
     setEditorView(v)
@@ -292,23 +386,24 @@ export default function App() {
     history.replaceState(null, '', url.toString())
   }
 
-  const summarizeEdit = useCallback((prev: string, next: string): string => {
-    if (prev === next) return '编辑文档'
-    const diff = next.length - prev.length
-    const preview = next.slice(0, 30).replace(/\n/g, ' / ')
-    if (diff > 0) return `新增 ${diff} 字符：${preview}`
-    if (diff < 0) return `删除 ${Math.abs(diff)} 字符`
-    return `修改内容：${preview}`
-  }, [])
-
   const postTimeline = useCallback(
-    async (newText: string) => {
-      const prev = lastLoggedTextRef.current
-      if (prev === newText) return
-      lastLoggedTextRef.current = newText
-      const summary = summarizeEdit(prev, newText)
+    (newText: string, beforeText?: string) => {
+      const baseText = pendingTimelineBaseRef.current ?? beforeText ?? beforeLocalEditRef.current ?? lastLoggedTextRef.current
+      pendingTimelineBaseRef.current = baseText
+      pendingTimelineNextRef.current = newText
+      beforeLocalEditRef.current = null
+
       if (postTimerRef.current) window.clearTimeout(postTimerRef.current)
       postTimerRef.current = window.setTimeout(async () => {
+        const prev = pendingTimelineBaseRef.current ?? lastLoggedTextRef.current
+        const next = pendingTimelineNextRef.current
+        pendingTimelineBaseRef.current = null
+        pendingTimelineNextRef.current = ''
+        lastLoggedTextRef.current = next
+
+        if (prev === next) return
+        const summary = summarizeEdit(prev, next)
+
         try {
           await fetch(`/api/room/${encodeURIComponent(room)}/timeline`, {
             method: 'POST',
@@ -320,13 +415,13 @@ export default function App() {
         }
       }, 600)
     },
-    [displayName, room, summarizeEdit],
+    [displayName, room],
   )
 
   const onLocalEdit = useCallback(
-    (newText: string) => {
+    (newText: string, beforeText?: string) => {
       rememberLocalDraft(newText)
-      postTimeline(newText)
+      postTimeline(newText, beforeText)
     },
     [postTimeline, rememberLocalDraft],
   )
