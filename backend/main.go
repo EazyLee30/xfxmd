@@ -168,10 +168,13 @@ func main() {
 			}
 			var rooms []gin.H
 			for _, e := range entries {
-				if e.IsDir() || !strings.HasSuffix(e.Name(), ".yjs") {
+				if e.IsDir() {
 					continue
 				}
-				name := strings.TrimSuffix(e.Name(), ".yjs")
+				name, ok := persistence.RoomNameFromDocFilename(e.Name())
+				if !ok {
+					continue
+				}
 				info, _ := e.Info()
 				size := int64(0)
 				if info != nil {

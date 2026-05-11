@@ -1,11 +1,13 @@
 package persistence
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/reearth/ygo/crdt"
 	"github.com/reearth/ygo/provider/websocket"
@@ -19,6 +21,8 @@ type FileStore struct {
 	cache map[string][]byte
 }
 
+const encodedRoomKeyPrefix = "room~"
+
 // NewFileStore creates a FileStore. The directory is created if missing.
 func NewFileStore(dir string) (*FileStore, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -30,7 +34,7 @@ func NewFileStore(dir string) (*FileStore, error) {
 	}, nil
 }
 
-func sanitizeRoom(room string) string {
+func legacyRoomKey(room string) string {
 	b := strings.Builder{}
 	for _, r := range room {
 		switch {
@@ -52,6 +56,38 @@ func sanitizeRoom(room string) string {
 	return s
 }
 
+func roomKey(room string) string {
+	return encodedRoomKeyPrefix + base64.RawURLEncoding.EncodeToString([]byte(room))
+}
+
+func isLegacyCompatibleRoom(room string) bool {
+	return room != "" && legacyRoomKey(room) == room
+}
+
+func decodeRoomKey(key string) (string, bool) {
+	if !strings.HasPrefix(key, encodedRoomKeyPrefix) {
+		return "", false
+	}
+	data, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(key, encodedRoomKeyPrefix))
+	if err != nil || !utf8.Valid(data) {
+		return "", false
+	}
+	return string(data), true
+}
+
+// RoomNameFromDocFilename returns the user-facing room name represented by a
+// persisted .yjs filename. Legacy filenames are returned as-is.
+func RoomNameFromDocFilename(filename string) (string, bool) {
+	if !strings.HasSuffix(filename, ".yjs") {
+		return "", false
+	}
+	key := strings.TrimSuffix(filename, ".yjs")
+	if room, ok := decodeRoomKey(key); ok {
+		return room, true
+	}
+	return key, true
+}
+
 func docPath(dir, key string) string {
 	return filepath.Join(dir, key+".yjs")
 }
@@ -66,7 +102,7 @@ func writeDeleteMarker(path string, deletedAt int64) error {
 
 // LoadDoc implements websocket.PersistenceAdapter.
 func (f *FileStore) LoadDoc(room string) ([]byte, error) {
-	key := sanitizeRoom(room)
+	key := roomKey(room)
 	path := docPath(f.Dir, key)
 
 	f.mu.Lock()
@@ -79,7 +115,19 @@ func (f *FileStore) LoadDoc(room string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			if !isLegacyCompatibleRoom(room) {
+				return nil, nil
+			}
+			legacyKey := legacyRoomKey(room)
+			legacyData, legacyErr := os.ReadFile(docPath(f.Dir, legacyKey))
+			if legacyErr != nil {
+				if os.IsNotExist(legacyErr) {
+					return nil, nil
+				}
+				return nil, legacyErr
+			}
+			f.cache[key] = legacyData
+			return legacyData, nil
 		}
 		return nil, err
 	}
@@ -92,7 +140,7 @@ func (f *FileStore) StoreUpdate(room string, update []byte) error {
 	if len(update) == 0 {
 		return nil
 	}
-	key := sanitizeRoom(room)
+	key := roomKey(room)
 	path := docPath(f.Dir, key)
 
 	f.mu.Lock()
@@ -104,6 +152,12 @@ func (f *FileStore) StoreUpdate(room string, update []byte) error {
 			existing = b
 		} else if !os.IsNotExist(err) {
 			return err
+		} else if isLegacyCompatibleRoom(room) {
+			if b, err := os.ReadFile(docPath(f.Dir, legacyRoomKey(room))); err == nil {
+				existing = b
+			} else if !os.IsNotExist(err) {
+				return err
+			}
 		}
 	}
 
@@ -129,7 +183,7 @@ func (f *FileStore) StoreUpdate(room string, update []byte) error {
 // DeleteDoc removes persisted state and the in-memory merge cache for a room.
 // It also records a reset timestamp so clients can avoid restoring stale local drafts.
 func (f *FileStore) DeleteDoc(room string, deletedAt int64) (bool, error) {
-	key := sanitizeRoom(room)
+	key := roomKey(room)
 	path := docPath(f.Dir, key)
 	markerPath := deleteMarkerPath(f.Dir, key)
 
@@ -148,6 +202,18 @@ func (f *FileStore) DeleteDoc(room string, deletedAt int64) (bool, error) {
 		}
 	}
 
+	if !deleted && isLegacyCompatibleRoom(room) {
+		legacyKey := legacyRoomKey(room)
+		if err := os.Remove(docPath(f.Dir, legacyKey)); err != nil {
+			if !os.IsNotExist(err) {
+				return false, err
+			}
+		} else {
+			deleted = true
+		}
+		_ = os.Remove(deleteMarkerPath(f.Dir, legacyKey))
+	}
+
 	if err := writeDeleteMarker(markerPath, deletedAt); err != nil {
 		return deleted, err
 	}
@@ -156,7 +222,7 @@ func (f *FileStore) DeleteDoc(room string, deletedAt int64) (bool, error) {
 
 // MarkDeleted records a room reset before live peers are disconnected.
 func (f *FileStore) MarkDeleted(room string, deletedAt int64) error {
-	key := sanitizeRoom(room)
+	key := roomKey(room)
 	path := deleteMarkerPath(f.Dir, key)
 
 	f.mu.Lock()
@@ -167,7 +233,7 @@ func (f *FileStore) MarkDeleted(room string, deletedAt int64) error {
 
 // HasDoc reports whether a room has persisted or cached document state.
 func (f *FileStore) HasDoc(room string) (bool, error) {
-	key := sanitizeRoom(room)
+	key := roomKey(room)
 	path := docPath(f.Dir, key)
 
 	f.mu.Lock()
@@ -178,7 +244,16 @@ func (f *FileStore) HasDoc(room string) (bool, error) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			return false, nil
+			if !isLegacyCompatibleRoom(room) {
+				return false, nil
+			}
+			if _, legacyErr := os.Stat(docPath(f.Dir, legacyRoomKey(room))); legacyErr != nil {
+				if os.IsNotExist(legacyErr) {
+					return false, nil
+				}
+				return false, legacyErr
+			}
+			return true, nil
 		}
 		return false, err
 	}
@@ -187,7 +262,7 @@ func (f *FileStore) HasDoc(room string) (bool, error) {
 
 // DeletedAt returns the most recent admin reset timestamp in milliseconds.
 func (f *FileStore) DeletedAt(room string) (int64, error) {
-	key := sanitizeRoom(room)
+	key := roomKey(room)
 	path := deleteMarkerPath(f.Dir, key)
 
 	f.mu.Lock()
@@ -196,9 +271,20 @@ func (f *FileStore) DeletedAt(room string) (int64, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return 0, nil
+			if !isLegacyCompatibleRoom(room) {
+				return 0, nil
+			}
+			legacyData, legacyErr := os.ReadFile(deleteMarkerPath(f.Dir, legacyRoomKey(room)))
+			if legacyErr != nil {
+				if os.IsNotExist(legacyErr) {
+					return 0, nil
+				}
+				return 0, legacyErr
+			}
+			data = legacyData
+		} else {
+			return 0, err
 		}
-		return 0, err
 	}
 	deletedAt, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
 	if err != nil {
