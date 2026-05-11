@@ -4,6 +4,7 @@ import { WebsocketProvider } from 'y-websocket'
 import { withAlpha } from '../utils/colors'
 
 const Y_TEXT_KEY = 'markdown'
+const RESYNC_INTERVAL_MS = 15000
 
 export function yjsBaseUrl(): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -82,7 +83,7 @@ export function useYjs(
       connect: true,
       disableBc: true,
       maxBackoffTime: 5000,
-      resyncInterval: 60000,
+      resyncInterval: RESYNC_INTERVAL_MS,
       params: resetAt > 0 ? { resetAt: String(resetAt) } : {},
     })
     let active = true
