@@ -82,7 +82,7 @@ export function useYjs(
       connect: true,
       disableBc: true,
       maxBackoffTime: 5000,
-      resyncInterval: 15000,
+      resyncInterval: 60000,
       params: resetAt > 0 ? { resetAt: String(resetAt) } : {},
     })
     let active = true

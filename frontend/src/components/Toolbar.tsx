@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { Transaction } from '@codemirror/state'
 import type { EditorView } from '@codemirror/view'
 import {
   Bold,
@@ -25,22 +26,74 @@ import {
 } from 'lucide-react'
 import { HIGHLIGHT_COLOR_OPTIONS, TEXT_COLOR_OPTIONS, type RichStyleKind, type RichStyleOption } from '../utils/richText'
 
+const headingRe = /^(#{1,6})\s/
+
 function wrap(view: EditorView, open: string, close: string = open) {
   const { from, to } = view.state.selection.main
   const text = view.state.sliceDoc(from, to)
+
+  // Toggle: if the surrounding text already has the markers, unwrap
+  const before = view.state.sliceDoc(Math.max(0, from - open.length), from)
+  const after = view.state.sliceDoc(to, Math.min(view.state.doc.length, to + close.length))
+  if (before === open && after === close) {
+    view.dispatch({
+      changes: [
+        { from: from - open.length, to: from, insert: '' },
+        { from: to, to: to + close.length, insert: '' },
+      ],
+      selection: { anchor: from - open.length, head: to - open.length },
+      annotations: Transaction.userEvent.of('toolbar'),
+    })
+    view.focus()
+    return
+  }
+
   view.dispatch({
     changes: { from, to, insert: open + text + close },
     selection: { anchor: from + open.length, head: from + open.length + text.length },
+    annotations: Transaction.userEvent.of('toolbar'),
   })
   view.focus()
 }
 
-function insertPrefixLine(view: EditorView, prefix: string) {
+function toggleLinePrefix(view: EditorView, prefix: string) {
   const pos = view.state.selection.main.head
   const line = view.state.doc.lineAt(pos)
+  const lineText = line.text
+
+  const isHeadingPrefix = headingRe.test(prefix)
+
+  // If the line already has this exact prefix, remove it (toggle off)
+  if (lineText.startsWith(prefix)) {
+    view.dispatch({
+      changes: { from: line.from, to: line.from + prefix.length, insert: '' },
+      selection: { anchor: Math.max(line.from, pos - prefix.length) },
+      annotations: Transaction.userEvent.of('toolbar'),
+    })
+    view.focus()
+    return
+  }
+
+  // For heading prefixes: replace any existing heading prefix
+  if (isHeadingPrefix) {
+    const existingMatch = headingRe.exec(lineText)
+    if (existingMatch) {
+      const oldLen = existingMatch[0].length
+      view.dispatch({
+        changes: { from: line.from, to: line.from + oldLen, insert: prefix },
+        selection: { anchor: pos + (prefix.length - oldLen) },
+        annotations: Transaction.userEvent.of('toolbar'),
+      })
+      view.focus()
+      return
+    }
+  }
+
+  // Default: insert prefix at beginning of line
   view.dispatch({
     changes: { from: line.from, insert: prefix },
     selection: { anchor: pos + prefix.length },
+    annotations: Transaction.userEvent.of('toolbar'),
   })
   view.focus()
 }
@@ -50,6 +103,7 @@ function insertBlock(view: EditorView, text: string) {
   view.dispatch({
     changes: { from: pos, insert: text },
     selection: { anchor: pos + text.length },
+    annotations: Transaction.userEvent.of('toolbar'),
   })
   view.focus()
 }
@@ -101,6 +155,7 @@ function replaceExistingAlignment(view: EditorView, align: TextAlignment) {
   view.dispatch({
     changes: { from: startBlock.openLine.from, to: startBlock.openLine.to, insert: `::: align-${align}` },
     selection: { anchor: to },
+    annotations: Transaction.userEvent.of('toolbar'),
   })
   view.focus()
   return true
@@ -119,6 +174,7 @@ function unwrapExistingAlignmentAsParagraph(view: EditorView) {
   view.dispatch({
     changes: { from: startBlock.openLine.from, to: startBlock.closeLine.to, insert: inner },
     selection: { anchor: startBlock.openLine.from + inner.length },
+    annotations: Transaction.userEvent.of('toolbar'),
   })
   view.focus()
   return true
@@ -134,6 +190,7 @@ function replaceSelectedLines(view: EditorView, update: (text: string) => string
   view.dispatch({
     changes: { from: startLine.from, to: endLine.to, insert: nextText },
     selection: { anchor: startLine.from + nextText.length },
+    annotations: Transaction.userEvent.of('toolbar'),
   })
   view.focus()
 }
@@ -157,6 +214,7 @@ function applyAlignment(view: EditorView, align: TextAlignment) {
   view.dispatch({
     changes: { from: startLine.from, to: endLine.to, insert },
     selection,
+    annotations: Transaction.userEvent.of('toolbar'),
   })
   view.focus()
 }
@@ -310,13 +368,13 @@ export function Toolbar({ view, disabled: disabledProp = false, onAction }: Tool
 
       <div className={divider} />
 
-      <button type="button" disabled={disabled} data-tooltip="一级标题" className={btn} onClick={() => apply(() => view && insertPrefixLine(view, '# '))}>
+      <button type="button" disabled={disabled} data-tooltip="一级标题" className={btn} onClick={() => apply(() => view && toggleLinePrefix(view, '# '))}>
         <Heading1 size={15} strokeWidth={2.2} />
       </button>
-      <button type="button" disabled={disabled} data-tooltip="二级标题" className={btn} onClick={() => apply(() => view && insertPrefixLine(view, '## '))}>
+      <button type="button" disabled={disabled} data-tooltip="二级标题" className={btn} onClick={() => apply(() => view && toggleLinePrefix(view, '## '))}>
         <Heading2 size={15} strokeWidth={2.2} />
       </button>
-      <button type="button" disabled={disabled} data-tooltip="三级标题" className={btn} onClick={() => apply(() => view && insertPrefixLine(view, '### '))}>
+      <button type="button" disabled={disabled} data-tooltip="三级标题" className={btn} onClick={() => apply(() => view && toggleLinePrefix(view, '### '))}>
         <Heading3 size={15} strokeWidth={2.2} />
       </button>
       <button type="button" disabled={disabled} data-tooltip="正文/段落" className={btn} onClick={() => apply(() => view && applyParagraph(view))}>
@@ -337,13 +395,13 @@ export function Toolbar({ view, disabled: disabledProp = false, onAction }: Tool
 
       <div className={divider} />
 
-      <button type="button" disabled={disabled} data-tooltip="无序列表" className={btn} onClick={() => apply(() => view && insertPrefixLine(view, '- '))}>
+      <button type="button" disabled={disabled} data-tooltip="无序列表" className={btn} onClick={() => apply(() => view && toggleLinePrefix(view, '- '))}>
         <List size={15} strokeWidth={2.2} />
       </button>
-      <button type="button" disabled={disabled} data-tooltip="有序列表" className={btn} onClick={() => apply(() => view && insertPrefixLine(view, '1. '))}>
+      <button type="button" disabled={disabled} data-tooltip="有序列表" className={btn} onClick={() => apply(() => view && toggleLinePrefix(view, '1. '))}>
         <ListOrdered size={15} strokeWidth={2.2} />
       </button>
-      <button type="button" disabled={disabled} data-tooltip="引用" className={btn} onClick={() => apply(() => view && insertPrefixLine(view, '> '))}>
+      <button type="button" disabled={disabled} data-tooltip="引用" className={btn} onClick={() => apply(() => view && toggleLinePrefix(view, '> '))}>
         <Quote size={15} strokeWidth={2.2} />
       </button>
       <TableMenu disabled={disabled} onPick={(rows, cols) => apply(() => view && insertBlock(view, buildMarkdownTable(rows, cols)))} />
@@ -367,6 +425,7 @@ export function Toolbar({ view, disabled: disabledProp = false, onAction }: Tool
           view.dispatch({
             changes: { from, to, insert: md },
             selection: { anchor: from + md.length },
+            annotations: Transaction.userEvent.of('toolbar'),
           })
           view.focus()
           done(beforeText)
