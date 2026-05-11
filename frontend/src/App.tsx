@@ -33,82 +33,6 @@ function readDefaultRoom(): string {
   return 'default'
 }
 
-type LocalDraft = {
-  room: string
-  text: string
-  updatedAt: number
-  restoredAt: number
-}
-
-const DRAFT_RESTORE_WINDOW_MS = 10 * 60 * 1000
-const DRAFT_RESTORE_COOLDOWN_MS = 2000
-const DRAFT_RESTORE_ORIGIN = 'xfxmd-local-draft-restore'
-
-type YTextTransaction = {
-  local?: boolean
-  origin?: unknown
-}
-
-function draftStorageKey(room: string): string {
-  return `xfxmd:local-draft:${encodeURIComponent(room)}`
-}
-
-function readStoredDraft(room: string): LocalDraft | null {
-  try {
-    const raw = window.localStorage.getItem(draftStorageKey(room))
-    if (!raw) return null
-    const draft = JSON.parse(raw) as Partial<LocalDraft>
-    if (draft.room !== room || typeof draft.text !== 'string') return null
-    if (typeof draft.updatedAt !== 'number' || typeof draft.restoredAt !== 'number') return null
-    return draft as LocalDraft
-  } catch {
-    return null
-  }
-}
-
-function writeStoredDraft(draft: LocalDraft) {
-  try {
-    if (draft.text.trim().length === 0) {
-      removeStoredDraft(draft.room)
-      return
-    }
-    window.localStorage.setItem(draftStorageKey(draft.room), JSON.stringify(draft))
-  } catch {
-    // Local draft restore is best-effort; editing must keep working without storage access.
-  }
-}
-
-function removeStoredDraft(room: string) {
-  try {
-    window.localStorage.removeItem(draftStorageKey(room))
-  } catch {
-    // ignore storage access issues
-  }
-}
-
-async function readRoomDeletedAt(room: string): Promise<number> {
-  try {
-    const res = await fetch(`/api/room/${encodeURIComponent(room)}/info`)
-    if (!res.ok) return 0
-    const data = (await res.json()) as { deletedAt?: number }
-    return typeof data.deletedAt === 'number' ? data.deletedAt : 0
-  } catch {
-    return 0
-  }
-}
-
-function shouldRestoreLocalDraft(draft: LocalDraft | null, room: string, nextText: string): boolean {
-  if (!draft || draft.room !== room || draft.text === nextText) return false
-  const now = Date.now()
-  if (now - draft.updatedAt > DRAFT_RESTORE_WINDOW_MS) return false
-  if (now - draft.restoredAt < DRAFT_RESTORE_COOLDOWN_MS) return false
-  if (draft.text.trim().length === 0) return false
-
-  const droppedChars = draft.text.length - nextText.length
-  const minDrop = Math.max(8, Math.floor(draft.text.length * 0.25))
-  return nextText.trim().length === 0 || droppedChars >= minDrop
-}
-
 function compactEditPreview(text: string): string {
   const compact = text
     .replace(/\r/g, '')
@@ -176,47 +100,22 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [timeline, setTimeline] = useState<TimelineItem[]>([])
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([])
-  const [restoreNotice, setRestoreNotice] = useState('')
   const lastLoggedTextRef = useRef('')
-  const localDraftRef = useRef<LocalDraft | null>(null)
-  const localInputUntilRef = useRef(0)
-  const draftRestoreCheckedRef = useRef(false)
   const beforeLocalEditRef = useRef<string | null>(null)
   const pendingTimelineBaseRef = useRef<string | null>(null)
   const pendingTimelineNextRef = useRef('')
   const postTimerRef = useRef<number | null>(null)
-  const restoreNoticeTimerRef = useRef<number | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
   const [splitPct, setSplitPct] = useState(52)
   const dragRef = useRef<{ startX: number; startPct: number; width: number } | null>(null)
 
-  const { collab, synced, status, ready } = useYjs(joined, room, displayName, color, avatarUrl)
+  const { collab, status, ready } = useYjs(joined, room, displayName, color, avatarUrl)
   const editorReady = ready
   const canEdit = editorReady
   const syncMessage = status === 'disconnected' ? '连接断开，正在重连…' : '正在同步文档…'
 
-  const rememberLocalDraft = useCallback((text: string, restoredAt = 0) => {
-    const draft = {
-      room,
-      text,
-      updatedAt: Date.now(),
-      restoredAt,
-    }
-    localDraftRef.current = draft
-    writeStoredDraft(draft)
-    return draft
-  }, [room])
-
-  const readLocalDraft = useCallback(() => {
-    if (localDraftRef.current?.room === room) return localDraftRef.current
-    const draft = readStoredDraft(room)
-    localDraftRef.current = draft
-    return draft
-  }, [room])
-
   const markLocalInput = useCallback((beforeText: string) => {
-    localInputUntilRef.current = Date.now() + 250
     if (pendingTimelineBaseRef.current === null && beforeLocalEditRef.current === null) {
       beforeLocalEditRef.current = beforeText
     }
@@ -240,76 +139,22 @@ export default function App() {
   }, [dark])
 
   useEffect(() => {
-    localDraftRef.current = readStoredDraft(room)
-    draftRestoreCheckedRef.current = false
-  }, [room])
-
-  useEffect(() => {
     if (!collab) {
       setMdText('')
       setTimeline([])
       setOnlineUsers([])
-      draftRestoreCheckedRef.current = false
       return
     }
-    let disposed = false
-    const upd = (_event?: unknown, transaction?: YTextTransaction) => {
+    const upd = () => {
       const nextText = collab.ytext.toString()
       setMdText(nextText)
-
-      if (transaction?.local) {
-        const restoredAt = transaction.origin === DRAFT_RESTORE_ORIGIN ? (localDraftRef.current?.restoredAt ?? Date.now()) : 0
-        rememberLocalDraft(nextText, restoredAt)
-        return
-      }
-
-      if (document.hasFocus() && Date.now() < localInputUntilRef.current) {
-        const draft = readLocalDraft()
-        if (!draft || nextText.length >= draft.text.length) {
-          rememberLocalDraft(nextText)
-        }
-        return
-      }
-
-      if (!synced || draftRestoreCheckedRef.current) {
-        return
-      }
-      draftRestoreCheckedRef.current = true
-
-      const draft = readLocalDraft()
-      if (!draft || !shouldRestoreLocalDraft(draft, room, nextText)) {
-        return
-      }
-
-      const draftText = draft.text
-      localDraftRef.current = { ...draft, restoredAt: Date.now() }
-      queueMicrotask(() => {
-        void (async () => {
-          const deletedAt = await readRoomDeletedAt(room)
-          if (disposed) return
-          if (deletedAt > 0 && draft.updatedAt <= deletedAt) {
-            localDraftRef.current = null
-            removeStoredDraft(room)
-            return
-          }
-          if (collab.ytext.toString() !== nextText) return
-          collab.ydoc.transact(() => {
-            collab.ytext.delete(0, collab.ytext.length)
-            collab.ytext.insert(0, draftText)
-          }, DRAFT_RESTORE_ORIGIN)
-          setRestoreNotice('已从本地草稿恢复')
-          if (restoreNoticeTimerRef.current) window.clearTimeout(restoreNoticeTimerRef.current)
-          restoreNoticeTimerRef.current = window.setTimeout(() => setRestoreNotice(''), 2500)
-        })()
-      })
     }
     upd()
     collab.ytext.observe(upd)
     return () => {
-      disposed = true
       collab.ytext.unobserve(upd)
     }
-  }, [collab, readLocalDraft, rememberLocalDraft, room, synced])
+  }, [collab])
 
   useEffect(() => {
     if (pendingTimelineBaseRef.current === null) {
@@ -365,7 +210,6 @@ export default function App() {
   useEffect(() => {
     return () => {
       if (postTimerRef.current) window.clearTimeout(postTimerRef.current)
-      if (restoreNoticeTimerRef.current) window.clearTimeout(restoreNoticeTimerRef.current)
     }
   }, [])
 
@@ -420,10 +264,9 @@ export default function App() {
 
   const onLocalEdit = useCallback(
     (newText: string, beforeText?: string) => {
-      rememberLocalDraft(newText)
       postTimeline(newText, beforeText)
     },
-    [postTimeline, rememberLocalDraft],
+    [postTimeline],
   )
 
   const onSplitPointerDown = (e: React.PointerEvent) => {
@@ -558,12 +401,6 @@ export default function App() {
             <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400">
               <span className="h-1 w-1 animate-pulse rounded-full bg-amber-500" />
               {syncMessage}
-            </span>
-          )}
-          {restoreNotice && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-teal-700 dark:text-teal-300">
-              <span className="h-1 w-1 rounded-full bg-teal-500" />
-              {restoreNotice}
             </span>
           )}
         </div>
