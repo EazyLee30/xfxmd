@@ -4,7 +4,13 @@ import { WebsocketProvider } from 'y-websocket'
 import { withAlpha } from '../utils/colors'
 
 const Y_TEXT_KEY = 'markdown'
-const RESYNC_INTERVAL_MS = 15000
+// ygo has a bug in EncodeStateAsUpdateV1 that corrupts split items during
+// resync step2.  We disable resyncInterval entirely and instead keep the
+// connection alive with periodic awareness queries (messageQueryAwareness=3).
+// The y-websocket library disconnects after 30 s without a received message,
+// so we send a query every 10 s — the server replies with awareness state,
+// which refreshes wsLastMessageReceived without triggering the buggy sync path.
+const KEEPALIVE_INTERVAL_MS = 10000
 
 export function yjsBaseUrl(): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -83,11 +89,23 @@ export function useYjs(
       connect: true,
       disableBc: true,
       maxBackoffTime: 5000,
-      resyncInterval: RESYNC_INTERVAL_MS,
+      resyncInterval: -1,
       params: resetAt > 0 ? { resetAt: String(resetAt) } : {},
     })
     let active = true
     let checkingReset = false
+
+    // Custom keepalive: send messageQueryAwareness (type 3) periodically.
+    // The server replies with awareness state, keeping wsLastMessageReceived
+    // fresh without triggering the buggy EncodeStateAsUpdateV1 path.
+    const keepaliveTimer = window.setInterval(() => {
+      const ws = provider.ws
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        const buf = new Uint8Array(1)
+        buf[0] = 3 // messageQueryAwareness as a single-byte VarUint
+        ws.send(buf)
+      }
+    }, KEEPALIVE_INTERVAL_MS)
 
     const refreshResetAt = () => {
       if (checkingReset) return
@@ -108,6 +126,7 @@ export function useYjs(
       setStatus(nextStatus)
       if (nextStatus !== 'connected') {
         setSynced(false)
+        setReady(false)
         refreshResetAt()
       }
     }
@@ -121,6 +140,7 @@ export function useYjs(
 
     return () => {
       active = false
+      window.clearInterval(keepaliveTimer)
       provider.off('sync', onSync)
       provider.off('status', onStatus)
       provider.off('connection-error', refreshResetAt)
