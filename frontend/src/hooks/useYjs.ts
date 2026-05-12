@@ -56,6 +56,11 @@ export function useYjs(
   const [ready, setReady] = useState(false)
   const [status, setStatus] = useState<CollabStatus>('idle')
   const [resetAt, setResetAt] = useState<number | null>(null)
+  // Bumped on disconnect to force Y.Doc recreation. This ensures the
+  // reconnecting client starts with an empty state vector so the server
+  // only sends the full-state step2 path (which bypasses the buggy diff
+  // computation in EncodeStateAsUpdateV1).
+  const [generation, setGeneration] = useState(0)
 
   useEffect(() => {
     if (!enabled) {
@@ -122,17 +127,27 @@ export function useYjs(
       setSynced(isSynced)
       if (isSynced) setReady(true)
     }
+    let hadConnection = false
     const onStatus = ({ status: nextStatus }: { status: CollabStatus }) => {
       setStatus(nextStatus)
-      if (nextStatus !== 'connected') {
+      if (nextStatus === 'connected') {
+        hadConnection = true
+      } else if (hadConnection) {
+        // Connection was established then lost.  Destroy this provider and
+        // force a fresh Y.Doc via generation bump so the next connection
+        // starts with an empty state vector (safe full-state path only).
         setSynced(false)
         setReady(false)
-        refreshResetAt()
+        provider.shouldConnect = false
+        provider.disconnect()
+        setGeneration((g) => g + 1)
       }
     }
     provider.on('sync', onSync)
     provider.on('status', onStatus)
-    provider.on('connection-error', refreshResetAt)
+    provider.on('connection-error', () => {
+      refreshResetAt()
+    })
 
     queueMicrotask(() => {
       if (active) setCollab({ ydoc, ytext, provider })
@@ -152,7 +167,7 @@ export function useYjs(
       setReady(false)
       setStatus('idle')
     }
-  }, [enabled, room, resetAt])
+  }, [enabled, room, resetAt, generation])
 
   useEffect(() => {
     if (!enabled || !collab) return
